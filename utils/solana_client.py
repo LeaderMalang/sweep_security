@@ -13,10 +13,14 @@ class SolanaConnectionPool:
         token = get_atn_jwt()
         if token:
             logging.info("🔑 ATN Auth: JWT generated successfully.")
-            headers = {"Authorization": f"Bearer {token}"}
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+                "Referer": "https://troydex.io"
+            }
         else:
             logging.warning("⚠️ ATN Auth: No JWT generated (check private.pem).")
-            headers = None
+            headers = {"Referer": "https://troydex.io"}
         
         # Use extra_headers keyword for authorization
         self.clients = [AsyncClient(e, extra_headers=headers) for e in self.endpoints]

@@ -19,7 +19,8 @@ async def test_rpc():
     
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {token}"
+        "Authorization": f"Bearer {token}",
+        "Referer": "https://troydex.io"
     }
     
     payload = {
