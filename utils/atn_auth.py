@@ -16,11 +16,14 @@ def get_atn_jwt():
         
     try:
         with open(pem_path, "r") as f:
-            private_key = f.read()
+            private_key = f.read().strip()
             
+        now = int(time.time())
         payload = {
-            "iat": int(time.time()),
-            "exp": int(time.time()) + 3600 # Valid for 1 hour
+            "iat": now - 60,   # 1 minute buffer
+            "nbf": now - 60,   # Valid immediately
+            "exp": now + 3600, # 1 hour expiry
+            "aud": "allthatnode.com"
         }
         
         headers = {
@@ -29,8 +32,13 @@ def get_atn_jwt():
             "kid": kid
         }
         
-        # Sign with RS256 as per the .pem file provided
+        # Sign with RS256
         token = jwt.encode(payload, private_key, algorithm="RS256", headers=headers)
+        
+        # Ensure token is a string (PyJWT 2.0+ returns str, but let's be safe)
+        if isinstance(token, bytes):
+            token = token.decode('utf-8')
+            
         return token
     except Exception as e:
         logging.error(f"⚠️ Failed to generate ATN JWT: {e}")
