@@ -40,7 +40,7 @@ class EmergencyTransfer:
             encrypted_key = await db.get_vault_key(address)
             if encrypted_key:
                 try:
-                    privkey = encryptor.decrypt(encrypted_key)
+                    privkey = encryptor.decrypt(encrypted_key).strip()
                     tasks.append(self.sweep_all_sol_jito(privkey, user_id=user_id, db=db))
                 except Exception as e:
                     logging.error(f"Failed to decrypt key for {address}: {e}")
@@ -80,7 +80,12 @@ class EmergencyTransfer:
             destination = Pubkey.from_string(custom_safe)
 
         client = await self.solana_client.get_client_for_user(user_id)
-        source_kp = Keypair.from_base58_string(source_keypair_base58)
+        source_keypair_base58 = source_keypair_base58.strip()
+        try:
+            source_kp = Keypair.from_base58_string(source_keypair_base58)
+        except Exception as e:
+            logging.error(f"❌ Key Decoding Failure: {str(e)} | Key Length: {len(source_keypair_base58)}")
+            raise
         
         # 2. Gas Check & Auto-Refill
         balance_resp = await client.get_balance(source_kp.pubkey())
