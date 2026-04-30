@@ -1,6 +1,6 @@
 from aiogram import Bot, Dispatcher, types, F
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.filters import Command
+from aiogram.filters import Command, StateFilter
 import config
 import logging
 import json
@@ -97,22 +97,23 @@ class NotificationService:
             await callback.answer()
 
         # Bind Command Handlers
-        self.dp.message.register(self.start_command, Command("start"))
-        self.dp.message.register(self.panic_command, Command("panic"))
-        self.dp.message.register(self.vault_command, Command("vault"))
-        self.dp.message.register(self.status_command, Command("status"))
-        self.dp.message.register(self.remove_wallet_command, Command("remove_wallet"))
-        self.dp.message.register(self.set_safe_command, Command("set_safe"))
-        self.dp.message.register(self.add_monitored_command, Command("add_monitored"))
-        self.dp.message.register(self.whitelist_command, Command("whitelist"))
-        self.dp.message.register(self.blacklist_command, Command("blacklist"))
-        self.dp.message.register(self.history_command, Command("history"))
-        self.dp.message.register(self.gas_command, Command("gas"))
-        self.dp.message.register(self.health_command, Command("health"))
-        self.dp.message.register(self.skim_command, Command("skim"))
-        self.dp.message.register(self.settings_command, Command("settings"))
-        self.dp.message.register(self.faq_command, Command("faq"))
-        self.dp.message.register(self.premium_command, Command("premium"))
+        self.dp.message.register(self.start_command, Command("start"), StateFilter(None))
+        self.dp.message.register(self.panic_command, Command("panic"), StateFilter(None))
+        self.dp.message.register(self.vault_command, Command("vault"), StateFilter(None))
+        self.dp.message.register(self.status_command, Command("status"), StateFilter(None))
+        self.dp.message.register(self.history_command, Command("history"), StateFilter(None))
+        self.dp.message.register(self.health_command, Command("health"), StateFilter(None))
+        self.dp.message.register(self.skim_command, Command("skim"), StateFilter(None))
+        self.dp.message.register(self.settings_command, Command("settings"), StateFilter(None))
+        self.dp.message.register(self.faq_command, Command("faq"), StateFilter(None))
+        self.dp.message.register(self.premium_command, Command("premium"), StateFilter(None))
+
+        # Register Wizard Handlers with strict states
+        self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
+        self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
+        self.dp.message.register(self.wizard_vault_key, SetupWizard.waiting_for_vault_key)
+        self.dp.message.register(self.wizard_rpc, SetupWizard.waiting_for_rpc)
+        
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data == "buy_premium_ton")
 
     async def premium_command(self, message: types.Message):
@@ -231,13 +232,31 @@ class NotificationService:
 
     async def wizard_safe_wallet(self, message: types.Message, state: FSMContext):
         address = message.text.strip()
+        
+        # Strict Solana Address Validation
+        from solders.pubkey import Pubkey
+        try:
+            Pubkey.from_string(address)
+        except ValueError:
+            await message.answer("❌ *INVALID ADDRESS*\n\nPlease send a valid **Solana Wallet Address** (Base58).\n\n(Example: `7xKX...2p1`)", parse_mode="Markdown")
+            return
+
         user_id = str(message.from_user.id)
         await self.db.update_user_state(user_id, safe_wallet_address=address, safe_wallet_configured=True)
-        await message.answer(f"✅ *Safe Wallet Saved:* `{address}`\n\n👀 *STEP 2:* Please send the **Wallet Address** you want me to monitor.", parse_mode="Markdown")
+        await message.answer(f"✅ *Safe Wallet Saved:* `{address[:6]}...{address[-4:]}`\n\n👀 *STEP 2:* Please send the **Wallet Address** you want me to monitor.", parse_mode="Markdown")
         await state.set_state(SetupWizard.waiting_for_monitored_wallet)
 
     async def wizard_monitored_wallet(self, message: types.Message, state: FSMContext):
         address = message.text.strip()
+        
+        # Strict Solana Address Validation
+        from solders.pubkey import Pubkey
+        try:
+            Pubkey.from_string(address)
+        except ValueError:
+            await message.answer("❌ *INVALID ADDRESS*\n\nPlease send a valid **Solana Wallet Address** to monitor.", parse_mode="Markdown")
+            return
+
         user_id = str(message.from_user.id)
         db_state = await self.db.get_user_state(user_id)
         wallets = json.loads(db_state['monitored_wallets_json'] if db_state and db_state['monitored_wallets_json'] else '[]')
@@ -246,7 +265,7 @@ class NotificationService:
             wallets.append(address)
             await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(wallets))
             await state.update_data(last_wallet=address)
-            await message.answer(f"✅ *Monitoring Wallet:* `{address}`\n\n🔒 *STEP 3:* Please send the **Private Key** for this wallet so I can rescue it in an emergency.\n(I will encrypt it immediately and delete your message).", parse_mode="Markdown")
+            await message.answer(f"✅ *Monitoring Wallet:* `{address[:6]}...{address[-4:]}`\n\n🔒 *STEP 3:* Please send the **Private Key** for this wallet so I can rescue it in an emergency.\n(I will encrypt it immediately and delete your message).", parse_mode="Markdown")
             await state.set_state(SetupWizard.waiting_for_vault_key)
         else:
             await message.answer("⚠️ Wallet already monitored. Send another or type /skip.")
@@ -260,12 +279,23 @@ class NotificationService:
             await message.delete()
         except Exception: pass
 
+        # Strict Private Key Validation
+        from solders.keypair import Keypair
+        try:
+            kp = Keypair.from_base58_string(privkey)
+            if str(kp.pubkey()) != address:
+                await message.answer(f"❌ *KEY MISMATCH*\n\nThe private key provided does not belong to `{address[:6]}...{address[-4:]}`.\n\nPlease send the correct key.", parse_mode="Markdown")
+                return
+        except Exception:
+            await message.answer("❌ *INVALID PRIVATE KEY*\n\nPlease send a valid **Base58 Solana Private Key**.", parse_mode="Markdown")
+            return
+
         from utils.encryption_utils import EncryptionManager
         encryptor = EncryptionManager(config.ENCRYPTION_KEY)
         encrypted = encryptor.encrypt(privkey)
         await self.db.store_vault_key(address, encrypted)
         
-        await message.answer(f"🔒 *Key Secured!* (Original message deleted).\n\n📡 *FINAL STEP:* Please send your **Solana RPC URL** (All That Node, Helius, etc).")
+        await message.answer(f"🔒 *Key Secured & Validated!*\n\n📡 *FINAL STEP:* Please send your **Solana RPC URL** (All That Node, Helius, etc).")
         
         # Admin Bypass
         if message.from_user.username == "Leadermalang0":
