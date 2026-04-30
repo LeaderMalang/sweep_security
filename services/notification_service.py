@@ -680,12 +680,27 @@ class NotificationService:
         except Exception as e:
             await message.answer(f"🔴 *SYSTEM HEALTH:* Critical\n📡 RPC Error: {str(e)[:50]}...", parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
-    async def add_bait_command(self, message: types.Message):
+    async def add_bait_command(self, message: types.Message, state: FSMContext):
         raw_input = message.text.replace("/add_bait", " ").replace(",", " ").split()
-        if not raw_input:
-            await message.answer("❌ Usage: `/add_bait [Address1, Address2, ...]`")
+        if raw_input:
+            await self._process_bait_addition(message, raw_input)
             return
-            
+
+        await message.answer(
+            "🍯 *HONEY POT WIZARD*\n\n"
+            "Bait wallets are used to harvest SOL from attackers who send gas to 'drain' your tokens.\n\n"
+            "👉 Please send the **Solana Address(es)** you want to turn into Honey Pots.\n"
+            "(You can send multiple separated by spaces or commas).",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_bait_addresses)
+
+    async def wizard_bait_addresses(self, message: types.Message, state: FSMContext):
+        raw_input = message.text.replace(",", " ").split()
+        await self._process_bait_addition(message, raw_input)
+        await state.clear()
+
+    async def _process_bait_addition(self, message, raw_input):
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
         db_state = dict(row) if row else {}
@@ -693,26 +708,16 @@ class NotificationService:
         
         from solders.pubkey import Pubkey
         added = []
-        errors = []
-
         for address in raw_input:
             try:
                 Pubkey.from_string(address)
                 if address not in bait_list:
                     bait_list.append(address)
                     added.append(address)
-                else:
-                    errors.append(f"⚠️ `{address[:6]}...`: Already in bait list.")
-            except ValueError:
-                errors.append(f"❌ `{address[:6]}...`: Invalid address.")
+            except: pass
 
         await self.db.update_user_state(user_id, bait_wallets_json=json.dumps(bait_list))
-        
-        report = "🍯 *Bulk Bait Update*\n"
-        if added: report += f"✅ Added: {len(added)} bait wallets\n"
-        if errors: report += "\n".join(errors[:5])
-
-        await message.answer(report, parse_mode="Markdown")
+        await message.answer(f"✅ *Honey Pot Updated:* Added `{len(added)}` bait wallets.", reply_markup=self.get_dashboard_markup())
 
     async def skim_command(self, message: types.Message, state: FSMContext):
         parts = message.text.split()
