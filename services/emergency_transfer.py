@@ -174,7 +174,7 @@ class EmergencyTransfer:
             )
             tx = Transaction([safe_kp], msg, recent_blockhash.value.blockhash)
             
-            res = await client.send_raw_transaction(tx.serialize())
+            res = await client.send_raw_transaction(bytes(tx))
             logging.info(f"⛽ Gas Injected for user {user_id}: {res}")
             return True
         except Exception as e:
