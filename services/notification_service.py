@@ -594,9 +594,10 @@ class NotificationService:
 
     async def _process_wallet_removal(self, message, address):
         user_id = str(message.from_user.id)
-        db_state = await self.db.get_user_state(user_id)
-        if not db_state: return
-
+        row = await self.db.get_user_state(user_id)
+        if not row: return
+        
+        db_state = dict(row)
         monitored = json.loads(db_state.get('monitored_wallets_json') or '[]')
         baits = json.loads(db_state.get('bait_wallets_json') or '[]')
         
@@ -745,7 +746,8 @@ class NotificationService:
             
             await self.db.update_user_state(user_id, skimming_retain=retain, skimming_threshold=threshold, skimming_enabled=True)
             
-            db_state = await self.db.get_user_state(user_id)
+            row = await self.db.get_user_state(user_id)
+            db_state = dict(row) if row else {}
             baits = json.loads(db_state.get('bait_wallets_json', '[]') or '[]')
             
             if not baits:
@@ -823,10 +825,10 @@ class NotificationService:
 
     async def show_settings_menu(self, user_id: str = None):
         user_id = user_id or str(config.TELEGRAM_CHAT_ID)
-        state = await self.db.get_user_state(user_id)
-        if not state: return
+        row = await self.db.get_user_state(user_id)
+        if not row: return
         
-        state = dict(state)
+        state = dict(row)
         tip = state.get('jito_tip_sol', 0.001)
         refill = "ENABLED" if state.get('auto_refill_gas', 1) else "DISABLED"
         
