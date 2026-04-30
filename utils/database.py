@@ -63,9 +63,10 @@ class Database:
 
     async def get_user_state(self, user_id):
         async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row # <--- Added this line
             async with db.execute("SELECT * FROM user_state WHERE user_id = ?", (user_id,)) as cursor:
-                row = await cursor.fetchone()
-                return row
+                return await cursor.fetchone()
+
 
     async def log_threat(self, wallet, score, reasons, signature):
         async with aiosqlite.connect(self.db_path) as db:

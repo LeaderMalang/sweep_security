@@ -20,7 +20,7 @@ class HygieneManager:
         user_id = config.TELEGRAM_CHAT_ID
         state = await self.db.get_user_state(user_id)
         
-        last_check = state[3] if state and state[3] else None
+        last_check = state['last_daily_check'] if state and state['last_daily_check'] else None
         
         should_prompt = False
         if not last_check:
