@@ -48,11 +48,16 @@ class SolanaClient:
             response = await self.client.get_balance(pubkey)
             return response.value / 1e9
         except Exception as e:
+            # Try to extract the error body for debugging JWT issues
+            error_details = ""
+            if hasattr(e, 'response') and hasattr(e.response, 'text'):
+                error_details = e.response.text
+            
             if retries <= 0:
-                logging.error(f"❌ RPC Final Failure: {e}")
+                logging.error(f"❌ RPC Final Failure: {e} | Details: {error_details}")
                 return 0.0
             
-            logging.error(f"RPC Error ({retries} retries left): {e}")
+            logging.error(f"RPC Error ({retries} retries left): {e} | Details: {error_details}")
             await self.pool.rotate_endpoint()
             return await self.get_balance(address, retries - 1)
 
