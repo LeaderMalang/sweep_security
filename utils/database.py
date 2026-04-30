@@ -60,7 +60,18 @@ class Database:
                     rpc_usage_count INTEGER DEFAULT 0
                 )
             ''')
-            # Secure Wallet Vault
+            # Database Migrations (Add missing columns to existing DB)
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN subscription_tier TEXT DEFAULT 'free'")
+            except Exception: pass # Already exists
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN subscription_expiry DATETIME")
+            except Exception: pass
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN rpc_usage_count INTEGER DEFAULT 0")
+            except Exception: pass
+            
+            await db.commit()
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS wallet_vault (
                     wallet_address TEXT PRIMARY KEY,

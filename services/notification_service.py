@@ -375,20 +375,23 @@ class NotificationService:
 
     async def status_command(self, message: types.Message):
         user_id = str(message.from_user.id)
-        state = await self.db.get_user_state(user_id)
-        if not state:
+        row = await self.db.get_user_state(user_id)
+        if not row:
             await message.answer("❌ No user profile found. Use /start.")
             return
+        
+        # Convert to dict for safe .get() access
+        state = dict(row)
         wallets = json.loads(state['monitored_wallets_json'] if state['monitored_wallets_json'] else '[]')
         safe_wallet = state['safe_wallet_address'] or "Not Configured"
         auto_def = "ON" if state['auto_defense'] else "OFF"
         status_text = (
             f"🛡️ *Guardian Security Report*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 Tier: *{state['subscription_tier'].upper()}*\n"
+            f"👤 Tier: *{state.get('subscription_tier', 'FREE').upper()}*\n"
             f"🏦 Safe Wallet: `{safe_wallet[:6]}...{safe_wallet[-4:]}`\n"
             f"🤖 Auto-Defense: *{auto_def}*\n"
-            f"📡 RPC Requests: *{state['rpc_usage_count']}*\n"
+            f"📡 RPC Requests: *{state.get('rpc_usage_count', 0)}*\n"
             f"👀 Monitoring: `{len(wallets)}` Wallets\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
         )
