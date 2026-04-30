@@ -2,9 +2,11 @@ import aiosqlite
 import json
 import logging
 
+import os
+
 class Database:
-    def __init__(self, db_path="guardian.db"):
-        self.db_path = db_path
+    def __init__(self, db_path=None):
+        self.db_path = db_path or os.getenv("DATABASE_PATH", "guardian.db")
 
     async def connect(self):
         async with aiosqlite.connect(self.db_path) as db:

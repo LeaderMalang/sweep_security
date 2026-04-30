@@ -12,6 +12,8 @@ class SetupWizard(StatesGroup):
     waiting_for_monitored_wallet = State()
     waiting_for_vault_key = State()
     waiting_for_rpc = State()
+    waiting_for_skim_retain = State()
+    waiting_for_skim_threshold = State()
 
 class NotificationService:
     def __init__(self, db=None, emergency_service=None):
@@ -72,6 +74,8 @@ class NotificationService:
         self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
         self.dp.message.register(self.wizard_vault_key, SetupWizard.waiting_for_vault_key)
         self.dp.message.register(self.wizard_rpc_config, SetupWizard.waiting_for_rpc)
+        self.dp.message.register(self.wizard_skim_retain, SetupWizard.waiting_for_skim_retain)
+        self.dp.message.register(self.wizard_skim_threshold, SetupWizard.waiting_for_skim_threshold)
 
         @self.dp.callback_query(F.data == "toggle_skimming")
         async def handle_toggle_skimming(callback: types.CallbackQuery):
@@ -345,17 +349,41 @@ class NotificationService:
         except Exception as e:
             await message.answer(f"🔴 *SYSTEM HEALTH:* Critical\n📡 RPC Error: {str(e)[:50]}...", parse_mode="Markdown")
 
-    async def skim_command(self, message: types.Message):
+    async def skim_command(self, message: types.Message, state: FSMContext):
         parts = message.text.split()
         if len(parts) < 3:
-            await message.answer("❌ Usage: `/skim [Retain_Amount] [Threshold]`\nExample: `/skim 0.01 0.02`", parse_mode="Markdown")
+            await message.answer("🍯 *AUTO-SKIMMING SETUP*\n\nLet's configure your harvesting. How much **SOL** should I leave in your bait wallet as a decoy?\n(Example: `0.01`)", parse_mode="Markdown")
+            await state.set_state(SetupWizard.waiting_for_skim_retain)
             return
+        
         try:
             retain, threshold, user_id = float(parts[1]), float(parts[2]), str(message.from_user.id)
             await self.db.update_user_state(user_id, skimming_retain=retain, skimming_threshold=threshold, skimming_enabled=True)
             await message.answer(f"🍯 *Auto-Skimming Configured!*\nRetain: `{retain} SOL`\nTrigger: `{threshold} SOL`", parse_mode="Markdown")
         except ValueError:
             await message.answer("❌ Invalid amounts. Please use numbers.")
+
+    async def wizard_skim_retain(self, message: types.Message, state: FSMContext):
+        try:
+            retain = float(message.text.strip())
+            await state.update_data(skim_retain=retain)
+            await message.answer(f"✅ *Retain Amount Saved:* `{retain} SOL`\n\n🚀 *STEP 2:* At what balance should I start **Harvesting** profit to your safe wallet?\n(Example: `0.02`)", parse_mode="Markdown")
+            await state.set_state(SetupWizard.waiting_for_skim_threshold)
+        except ValueError:
+            await message.answer("❌ Please send a valid number (e.g., 0.01).")
+
+    async def wizard_skim_threshold(self, message: types.Message, state: FSMContext):
+        try:
+            threshold = float(message.text.strip())
+            data = await state.get_data()
+            retain = data.get('skim_retain')
+            user_id = str(message.from_user.id)
+            
+            await self.db.update_user_state(user_id, skimming_retain=retain, skimming_threshold=threshold, skimming_enabled=True)
+            await message.answer(f"🍯 *Auto-Skimming ARMED!*\n\n💰 I will keep `{retain} SOL` as bait and harvest everything above `{threshold} SOL` automatically.")
+            await state.clear()
+        except ValueError:
+            await message.answer("❌ Please send a valid number (e.g., 0.05).")
 
     async def settings_command(self, message: types.Message):
         await self.show_settings_menu()

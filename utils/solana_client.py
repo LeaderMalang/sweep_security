@@ -52,7 +52,7 @@ class SolanaClient:
         # For now, we assume the user_id passed is verified or we check DB.
         if self.db:
             state = await self.db.get_user_state(user_id)
-            if state and state.get('custom_rpc_url'):
+            if state and state['custom_rpc_url']:
                 # Regular user with custom RPC
                 return AsyncClient(state['custom_rpc_url'], extra_headers={"Referer": "https://troydex.io"})
         
