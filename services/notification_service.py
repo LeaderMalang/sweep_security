@@ -14,6 +14,14 @@ class SetupWizard(StatesGroup):
     waiting_for_skim_retain = State()
     waiting_for_skim_threshold = State()
     waiting_for_skim_addresses = State()
+    
+    # Feature Wizards
+    waiting_for_remove_wallet = State()
+    waiting_for_vault_address = State()
+    waiting_for_gas_key = State()
+    waiting_for_tip_amount = State()
+    waiting_for_rpc_url = State()
+    waiting_for_bait_addresses = State()
 
 class NotificationService:
     def __init__(self, db=None, emergency_service=None):
@@ -23,6 +31,12 @@ class NotificationService:
         self.db = db
         self.emergency_service = emergency_service
         self._register_handlers()
+
+    def get_dashboard_markup(self):
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="📊 Refresh Status", callback_data="status_refresh"))
+        builder.row(types.InlineKeyboardButton(text="⚙️ Open Settings", callback_data="settings_menu"))
+        return builder.as_markup()
 
     def _register_handlers(self):
         @self.dp.callback_query(F.data.startswith("sweep_"))
@@ -129,6 +143,12 @@ class NotificationService:
         self.dp.message.register(self.wizard_skim_threshold, SetupWizard.waiting_for_skim_threshold)
         self.dp.message.register(self.wizard_skim_addresses, SetupWizard.waiting_for_skim_addresses)
         
+        # Guided Feature Wizards
+        self.dp.message.register(self.wizard_remove_wallet, SetupWizard.waiting_for_remove_wallet)
+        self.dp.message.register(self.wizard_vault_address, SetupWizard.waiting_for_vault_address)
+        self.dp.message.register(self.wizard_vault_key_guided, SetupWizard.waiting_for_vault_key) # Guided mode
+        self.dp.message.register(self.wizard_gas_key, SetupWizard.waiting_for_gas_key)
+        
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
         self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
 
@@ -152,7 +172,7 @@ class NotificationService:
                 "━━━━━━━━━━━━━━━━━━━━\n"
                 "🛡️ *Nexus Security Level: MAXIMUM*"
             )
-            await message.answer(premium_text, parse_mode="Markdown")
+            await message.answer(premium_text, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
             return
 
         premium_text = (
@@ -211,7 +231,7 @@ class NotificationService:
             "━━━━━━━━━━━━━━━━━━━━\n"
             "💡 *Tip:* Use `/set_tip 0.005` to apply the recommended priority fee now."
         )
-        await message.answer(recommend_text, parse_mode="Markdown")
+        await message.answer(recommend_text, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
     async def handle_toggle_auto_wizard(self, callback: types.CallbackQuery):
         user_id = str(callback.from_user.id)
@@ -242,42 +262,47 @@ class NotificationService:
             "━━━━━━━━━━━━━━━━━━━━\n"
             "💡 *Need more help?* Contact @Leadermalang0"
         )
-        await message.answer(faq_text, parse_mode="Markdown")
+        await message.answer(faq_text, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
         self.dp.message.register(self.report_command, Command("report"))
         self.dp.message.register(self.test_attack_command, Command("test_attack"))
 
-    async def set_gas_key_command(self, message: types.Message):
+    async def set_gas_key_command(self, message: types.Message, state: FSMContext):
         parts = message.text.split()
-        if len(parts) < 2:
-            await message.answer("❌ Usage: `/set_gas_key [Private_Key]`\n\n*Note:* This key will be used to fuel your infected wallets during emergency rescues.")
-            try: await message.delete()
-            except: pass
+        if len(parts) >= 2:
+            privkey = parts[1].strip()
+            await self._process_gas_key(message, privkey)
             return
-            
-        privkey = parts[1].strip()
+
+        await message.answer(
+            "⛽ *PERSONAL GAS WIZARD*\n\n"
+            "This links your **Safe Wallet** private key to enable self-sufficient refills.\n\n"
+            "👉 Please send the **Private Key** of your Safe Wallet.\n"
+            "_I will delete your message instantly._",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_gas_key)
+
+    async def wizard_gas_key(self, message: types.Message, state: FSMContext):
+        privkey = message.text.strip()
+        await self._process_gas_key(message, privkey)
+        await state.clear()
+
+    async def _process_gas_key(self, message, privkey):
+        try: await message.delete()
+        except: pass
         user_id = str(message.from_user.id)
-        
-        # Validate and get address
         try:
             from solders.keypair import Keypair
-            import base58
             kp = Keypair.from_base58_string(privkey)
             address = str(kp.pubkey())
-            
-            # Encrypt and store
-            from utils.hygiene_manager import HygieneManager
-            hygiene = HygieneManager(self.db)
-            encrypted = hygiene.fernet.encrypt(privkey.encode()).decode()
+            from utils.encryption_utils import EncryptionManager
+            encryptor = EncryptionManager(config.ENCRYPTION_KEY)
+            encrypted = encryptor.encrypt(privkey)
             await self.db.store_vault_key(address, encrypted)
-            
-            # Link this address as the user's safe wallet
             await self.db.update_user_state(user_id, safe_wallet_address=address, safe_wallet_configured=True)
-            
-            await message.answer(f"🔐 *Personal Gas Tank Linked!*\n\nAddress: `{address}`\n\nThis wallet will now be used as the source for your Auto-Refills and Jito Tips.", parse_mode="Markdown")
-            try: await message.delete() # Security: Delete the message containing the PK
-            except: pass
+            await message.answer(f"⛽ *GAS TANK ARMED:* `{address[:8]}...` is now your personal refill source.", reply_markup=self.get_dashboard_markup())
         except Exception as e:
-            await message.answer(f"❌ Invalid Private Key: {str(e)}")
+            await message.answer(f"❌ Error: {str(e)}")
 
     async def start_command(self, message: types.Message, state: FSMContext):
         user_id = str(message.from_user.id)
@@ -409,22 +434,42 @@ class NotificationService:
         else:
             await message.answer("❌ *SYSTEM ERROR:* Emergency Service offline.")
 
-    async def vault_command(self, message: types.Message):
+    async def vault_command(self, message: types.Message, state: FSMContext):
         parts = message.text.split()
-        if len(parts) < 3:
-            await message.answer("❌ Usage: `/vault [Address] [Private_Key]`", parse_mode="Markdown")
+        if len(parts) >= 3:
+            address, privkey = parts[1], parts[2]
+            await self._process_vault_key(message, address, privkey)
             return
-        address, privkey = parts[1], parts[2]
-        user_id = str(message.from_user.id)
-        try:
-            await message.delete()
-        except Exception as e:
-            logging.warning(f"Could not delete vault message: {e}")
+
+        await message.answer(
+            "🔐 *SECURE VAULT WIZARD*\n\n"
+            "This will encrypt and link a private key to your monitored wallet.\n\n"
+            "👉 *STEP 1:* Please send the **Wallet Address**.",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_vault_address)
+
+    async def wizard_vault_address(self, message: types.Message, state: FSMContext):
+        address = message.text.strip()
+        await state.update_data(vault_address=address)
+        await message.answer(f"✅ Address `{address[:8]}...` received.\n\n👉 *STEP 2:* Now send the **Private Key** (Base58).\n_I will delete your message instantly for security._", parse_mode="Markdown")
+        await state.set_state(SetupWizard.waiting_for_vault_key)
+
+    async def wizard_vault_key_guided(self, message: types.Message, state: FSMContext):
+        privkey = message.text.strip()
+        data = await state.get_data()
+        address = data.get('vault_address')
+        await self._process_vault_key(message, address, privkey)
+        await state.clear()
+
+    async def _process_vault_key(self, message, address, privkey):
+        try: await message.delete()
+        except: pass
         from utils.encryption_utils import EncryptionManager
         encryptor = EncryptionManager(config.ENCRYPTION_KEY)
         encrypted = encryptor.encrypt(privkey)
         await self.db.store_vault_key(address, encrypted)
-        await message.answer(f"🔒 *SECURE VAULT:* Key for `{address[:8]}...` encrypted and saved. (Original message deleted)", parse_mode="Markdown")
+        await message.answer(f"🔒 *SECURE VAULT:* Key for `{address[:8]}...` encrypted and saved.", reply_markup=self.get_dashboard_markup())
 
     async def status_command(self, message: types.Message, user_id_override: str = None):
         user_id = user_id_override or str(message.from_user.id)
@@ -482,11 +527,7 @@ class NotificationService:
         if len(baits) > 3: status_text += "• ... (Use /wallets for full list)\n"
         status_text += "━━━━━━━━━━━━━━━━━━━━"
 
-        builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="📊 Refresh Status", callback_data="status_refresh"))
-        builder.row(types.InlineKeyboardButton(text="⚙️ Open Settings", callback_data="settings_menu"))
-        
-        await message.answer(status_text, parse_mode="Markdown", reply_markup=builder.as_markup())
+        await message.answer(status_text, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
     async def wallets_command(self, message: types.Message, user_id_override: str = None):
         user_id = user_id_override or str(message.from_user.id)
@@ -521,17 +562,29 @@ class NotificationService:
         if not baits: report += "_No bait configured._\n"
         
         report += "━━━━━━━━━━━━━━━━━━━━"
-        builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="🏠 Back to Dashboard", callback_data="status_refresh"))
-        await message.answer(report, parse_mode="Markdown", reply_markup=builder.as_markup())
+        await message.answer(report, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
-    async def remove_wallet_command(self, message: types.Message):
+    async def remove_wallet_command(self, message: types.Message, state: FSMContext):
         parts = message.text.split()
-        if len(parts) < 2:
-            await message.answer("❌ Usage: `/remove_wallet [Address]`")
+        if len(parts) >= 2:
+            address = parts[1].strip()
+            await self._process_wallet_removal(message, address)
             return
-        
-        address = parts[1].strip()
+
+        await message.answer(
+            "🗑️ *REMOVE WALLET WIZARD*\n\n"
+            "Please send the **Solana Address** you want to remove from your fleet.\n"
+            "(This will also delete its encrypted key from the vault).",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_remove_wallet)
+
+    async def wizard_remove_wallet(self, message: types.Message, state: FSMContext):
+        address = message.text.strip()
+        await self._process_wallet_removal(message, address)
+        await state.clear()
+
+    async def _process_wallet_removal(self, message, address):
         user_id = str(message.from_user.id)
         db_state = await self.db.get_user_state(user_id)
         if not db_state: return
@@ -552,9 +605,9 @@ class NotificationService:
             await self.db.update_user_state(user_id, 
                                           monitored_wallets_json=json.dumps(monitored),
                                           bait_wallets_json=json.dumps(baits))
-            await message.answer(f"✅ Wallet `{address[:10]}...` removed from all lists.")
+            await message.answer(f"✅ Wallet `{address[:10]}...` removed successfully.", reply_markup=self.get_dashboard_markup())
         else:
-            await message.answer(f"❓ Wallet `{address[:10]}...` not found in your inventory.")
+            await message.answer(f"❓ Wallet `{address[:10]}...` not found.", reply_markup=self.get_dashboard_markup())
 
     async def set_safe_command(self, message: types.Message):
         parts = message.text.split()
@@ -601,10 +654,7 @@ class NotificationService:
         if not logs:
             await message.answer("📁 No threat logs found.")
             return
-        report = "📜 *Recent Threat History*\n\n"
-        for log in logs:
-            report += f"🕒 {log['timestamp']}\n⚖️ Score: `{log['risk_score']}`\n📍 Wallet: `{log['wallet_address'][:8]}...`\n\n"
-        await message.answer(report, parse_mode="Markdown")
+        await message.answer(report, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
     async def gas_command(self, message: types.Message):
         from utils.solana_client import SolanaClient
@@ -617,9 +667,9 @@ class NotificationService:
         sc = SolanaClient()
         try:
             await sc.get_balance("GkYoTMJKKqzbaebzVkDS4KvNvbgFt5suFpAqx6LbMcSR")
-            await message.answer("🟢 *SYSTEM HEALTH:* Normal\n📡 RPC: Connected (ATN)\n🛡️ Mesh: Synchronized", parse_mode="Markdown")
+            await message.answer("🟢 *SYSTEM HEALTH:* Normal\n📡 RPC: Connected (ATN)\n🛡️ Mesh: Synchronized", parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
         except Exception as e:
-            await message.answer(f"🔴 *SYSTEM HEALTH:* Critical\n📡 RPC Error: {str(e)[:50]}...", parse_mode="Markdown")
+            await message.answer(f"🔴 *SYSTEM HEALTH:* Critical\n📡 RPC Error: {str(e)[:50]}...", parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
     async def add_bait_command(self, message: types.Message):
         raw_input = message.text.replace("/add_bait", " ").replace(",", " ").split()
