@@ -583,7 +583,7 @@ class NotificationService:
         message = (
             "⚙️ *TACTICAL SETTINGS*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚡ Jito Tip: `{tip} SOL` (Use /set_tip)\n"
+            f"⚡ Jito Tip: `{tip} SOL` (Use `/set_tip`)\n"
             f"⛽ Auto-Refill: *{refill}*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "Configure your bot's behavior:"
