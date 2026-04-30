@@ -4,6 +4,8 @@ import json
 import websockets
 import config
 from datetime import datetime
+from utils.solana_client import SolanaClient
+from utils.signature_registry import SignatureRegistry
 
 class HoneyPotManager:
     def __init__(self, db, threat_detector, emergency_service=None):
@@ -153,10 +155,14 @@ class HoneyPotManager:
 
     async def handle_security_event(self, result, monitored_list):
         """Identifies the victim and triggers an immediate counter-sweep."""
-        logs = result.get('value', {}).get('logs', [])
-        # Simple heuristic: If we see a transfer in the logs, check if it targets our fleet
         signature = result.get('value', {}).get('signature')
         
+        # 0. Whitelist check (Prevent self-triggering)
+        if signature and SignatureRegistry().is_whitelisted(signature):
+            logging.info(f"✅ Friendly Fire Prevented: Ignoring own transaction {signature[:10]}...")
+            return
+
+        logs = result.get('value', {}).get('logs', [])
         logging.warning(f"🎯 THREAT DETECTED: Activity on Monitored Fleet! Sig: {signature}")
         
         # Trigger Global Panic for all users associated with this activity
@@ -166,7 +172,7 @@ class HoneyPotManager:
             user = dict(u)
             user_id = str(user['user_id'])
             if user.get('auto_defense'):
-                await self.emergency_service.execute_all(user_id, self.db)
+                await self.emergency_service.execute_all(user_id)
 
     async def broadcast_threat(self, address):
         """Simulates broadcasting threat intelligence to a central network."""
