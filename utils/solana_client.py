@@ -4,11 +4,20 @@ import config
 from solana.rpc.async_api import AsyncClient
 from solders.pubkey import Pubkey
 
+from utils.atn_auth import get_atn_jwt
+
 class SolanaConnectionPool:
     def __init__(self):
         self.endpoints = [config.SOLANA_RPC_URL]
-        # In a real app, we could load more from config
-        self.clients = [AsyncClient(e) for e in self.endpoints]
+        
+        # Get JWT for All That Node if private.pem exists
+        token = get_atn_jwt()
+        headers = {"Authorization": f"Bearer {token}"} if token else None
+        
+        if token:
+            logging.info("🔑 ATN Auth: JWT injected into RPC clients.")
+            
+        self.clients = [AsyncClient(e, headers=headers) for e in self.endpoints]
         self.current_index = 0
 
     def get_client(self) -> AsyncClient:

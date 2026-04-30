@@ -10,4 +10,6 @@ websockets
 base58
 fastapi
 uvicorn
+PyJWT
+cryptography
 
