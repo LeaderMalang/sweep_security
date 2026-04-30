@@ -120,6 +120,7 @@ class NotificationService:
         self.dp.message.register(self.premium_command, Command("premium"), StateFilter(None))
         self.dp.message.register(self.set_tip_command, Command("set_tip"), StateFilter(None))
         self.dp.message.register(self.add_monitored_command, Command("add_monitored"), StateFilter(None))
+        self.dp.message.register(self.add_bait_command, Command("add_bait"), StateFilter(None))
 
         # Register Wizard Handlers with strict states
         self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
@@ -279,28 +280,46 @@ class NotificationService:
         await state.set_state(SetupWizard.waiting_for_monitored_wallet)
 
     async def wizard_monitored_wallet(self, message: types.Message, state: FSMContext):
-        address = message.text.strip()
-        
-        # Strict Solana Address Validation
-        from solders.pubkey import Pubkey
-        try:
-            Pubkey.from_string(address)
-        except ValueError:
-            await message.answer("❌ *INVALID ADDRESS*\n\nPlease send a valid **Solana Wallet Address** to monitor.", parse_mode="Markdown")
-            return
-
+        raw_input = message.text.replace(",", " ").split()
         user_id = str(message.from_user.id)
         db_state = await self.db.get_user_state(user_id)
         wallets = json.loads(db_state['monitored_wallets_json'] if db_state and db_state['monitored_wallets_json'] else '[]')
+        tier = db_state.get('subscription_tier', 'free') if db_state else 'free'
+        is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
+
+        from solders.pubkey import Pubkey
+        added = []
+        errors = []
+
+        for address in raw_input:
+            address = address.strip()
+            try:
+                Pubkey.from_string(address)
+                if not is_admin and tier == 'free' and len(wallets) >= 1:
+                    errors.append(f"❌ `{address[:6]}...`: Tier limit reached.")
+                    break
+                if address not in wallets:
+                    wallets.append(address)
+                    added.append(address)
+                else:
+                    errors.append(f"⚠️ `{address[:6]}...`: Already monitored.")
+            except ValueError:
+                errors.append(f"❌ `{address[:6]}...`: Invalid address.")
+
+        await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(wallets))
         
-        if address not in wallets:
-            wallets.append(address)
-            await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(wallets))
-            await state.update_data(last_wallet=address)
-            await message.answer(f"✅ *Monitoring Wallet:* `{address[:6]}...{address[-4:]}`\n\n🔒 *STEP 3:* Please send the **Private Key** for this wallet so I can rescue it in an emergency.\n(I will encrypt it immediately and delete your message).", parse_mode="Markdown")
+        report = "🛡️ *Bulk Monitoring Update*\n"
+        if added: report += f"✅ Added: {len(added)} wallets\n"
+        if errors: report += "\n".join(errors[:5]) # Show first 5 errors
+
+        await message.answer(report, parse_mode="Markdown")
+        
+        if added:
+            await state.update_data(last_wallet=added[-1]) # Use last one for key setup
+            await message.answer(f"🔒 *STEP 3:* Please send the **Private Key** for `{added[-1][:6]}...` to enable rescue logic.\n(You can add keys for others via /vault [Address])", parse_mode="Markdown")
             await state.set_state(SetupWizard.waiting_for_vault_key)
         else:
-            await message.answer("⚠️ Wallet already monitored. Send another or type /skip.")
+            await state.clear()
 
     async def wizard_vault_key(self, message: types.Message, state: FSMContext):
         privkey = message.text.strip()
@@ -507,6 +526,39 @@ class NotificationService:
         except Exception as e:
             await message.answer(f"🔴 *SYSTEM HEALTH:* Critical\n📡 RPC Error: {str(e)[:50]}...", parse_mode="Markdown")
 
+    async def add_bait_command(self, message: types.Message):
+        raw_input = message.text.replace("/add_bait", " ").replace(",", " ").split()
+        if not raw_input:
+            await message.answer("❌ Usage: `/add_bait [Address1, Address2, ...]`")
+            return
+            
+        user_id = str(message.from_user.id)
+        db_state = await self.db.get_user_state(user_id)
+        bait_list = json.loads(db_state.get('bait_wallets_json', '[]') if db_state else '[]')
+        
+        from solders.pubkey import Pubkey
+        added = []
+        errors = []
+
+        for address in raw_input:
+            try:
+                Pubkey.from_string(address)
+                if address not in bait_list:
+                    bait_list.append(address)
+                    added.append(address)
+                else:
+                    errors.append(f"⚠️ `{address[:6]}...`: Already in bait list.")
+            except ValueError:
+                errors.append(f"❌ `{address[:6]}...`: Invalid address.")
+
+        await self.db.update_user_state(user_id, bait_wallets_json=json.dumps(bait_list))
+        
+        report = "🍯 *Bulk Bait Update*\n"
+        if added: report += f"✅ Added: {len(added)} bait wallets\n"
+        if errors: report += "\n".join(errors[:5])
+
+        await message.answer(report, parse_mode="Markdown")
+
     async def skim_command(self, message: types.Message, state: FSMContext):
         parts = message.text.split()
         if len(parts) < 3:
@@ -623,6 +675,7 @@ class NotificationService:
             BotCommand(command="settings", description="Configure Defense Modes"),
             BotCommand(command="vault", description="🔒 Securely Store Private Key"),
             BotCommand(command="add_monitored", description="Add Wallet to Watch-list"),
+            BotCommand(command="add_bait", description="🍯 Bulk Add Bait Wallets"),
             BotCommand(command="set_safe", description="Set Rescue Destination"),
             BotCommand(command="skim", description="🍯 Configure Auto-Harvesting"),
             BotCommand(command="history", description="📜 View Threat History"),
