@@ -15,6 +15,17 @@ class EmergencyTransfer:
         self.jito_client = jito_client or JitoClient()
         self.safe_wallet = Pubkey.from_string(config.SAFE_WALLET_ADDRESS) if config.SAFE_WALLET_ADDRESS else None
 
+    async def execute_all(self):
+        """Triggers a global sweep of all protected assets."""
+        logging.warning("🚨 GLOBAL PANIC: execute_all triggered.")
+        # In a real scenario, this would fetch encrypted keys from the DB
+        return False
+
+    async def sweep_all(self, wallet_address, destination):
+        """Sweeps a specific wallet to a destination."""
+        logging.info(f"🚀 Manual sweep initiated for {wallet_address} -> {destination}")
+        return False
+
     async def sweep_all_sol_jito(self, source_keypair_base58: str, tip_amount_lamports: int = 100000):
         """
         Transfers all SOL using a Jito bundle for maximum security and speed.

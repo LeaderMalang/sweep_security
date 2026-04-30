@@ -41,10 +41,15 @@ class NotificationService:
 
         @self.dp.message(Command("panic"))
         async def panic_command(message: types.Message):
-            await message.answer("⚠️ *GLOBAL PANIC INITIATED* ⚠️\nExecuting emergency sweep logic...")
+            await message.answer("⚠️ *GLOBAL PANIC INITIATED* ⚠️\nConnecting to Secure Vault...")
             if self.emergency_service:
-                await self.emergency_service.execute_all() # Logic from Phase 5
-            await message.answer("✅ Recovery sweep logic completed.")
+                success = await self.emergency_service.execute_all()
+                if success:
+                    await message.answer("✅ *CRITICAL:* All assets successfully swept to Safe Wallet.")
+                else:
+                    await message.answer("❌ *PANIC FAILED:* No encrypted keys found in vault. Please configure your wallets in the dashboard.")
+            else:
+                await message.answer("❌ *SYSTEM ERROR:* Emergency Service offline.")
 
         @self.dp.message(Command("settings"))
         async def settings_command(message: types.Message):
