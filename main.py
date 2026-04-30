@@ -59,7 +59,7 @@ async def main():
     gas_tank = GasTankManager(solana_client)
     
     # 5. Initialize Response Engine
-    emergency_service = EmergencyTransfer(solana_client, jito_client=jito_client)
+    emergency_service = EmergencyTransfer(solana_client, jito_client=jito_client, db=db)
     notification_service.emergency_service = emergency_service
     wallet_monitor = WalletMonitor(threat_detector, notification_service, db, emergency_service)
     evm_monitor = EVMMonitor(threat_detector, notification_service)

@@ -516,7 +516,7 @@ class NotificationService:
         user_id = str(message.from_user.id)
         await message.answer("⚠️ *GLOBAL PANIC INITIATED* ⚠️\nConnecting to Secure Vault...")
         if self.emergency_service:
-            success = await self.emergency_service.execute_all(user_id, self.db)
+            success = await self.emergency_service.execute_all(user_id)
             if success:
                 await message.answer("✅ *CRITICAL:* All assets successfully swept to Safe Wallet.")
             else:

@@ -13,13 +13,15 @@ import asyncio
 from utils.signature_registry import SignatureRegistry
 
 class EmergencyTransfer:
-    def __init__(self, solana_client, jito_client=None):
+    def __init__(self, solana_client, jito_client=None, db=None):
         self.solana_client = solana_client
         self.jito_client = jito_client or JitoClient()
+        self.db = db
         self.safe_wallet = Pubkey.from_string(config.SAFE_WALLET_ADDRESS) if config.SAFE_WALLET_ADDRESS else None
 
-    async def execute_all(self, user_id: str, db):
+    async def execute_all(self, user_id: str):
         """Triggers a global sweep of all protected assets for a user."""
+        db = self.db
         logging.warning(f"🚨 GLOBAL PANIC: execute_all triggered for user {user_id}")
         
         from utils.encryption_utils import EncryptionManager
@@ -57,6 +59,7 @@ class EmergencyTransfer:
         Transfers all SOL using a Jito bundle.
         Performs Auto-Refill if the source wallet is empty and the feature is enabled.
         """
+        db = db or self.db
         if not self.safe_wallet:
             logging.error("Safe wallet address not configured.")
             return None
