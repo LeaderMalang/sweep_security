@@ -927,18 +927,24 @@ class NotificationService:
     async def set_rpc_command(self, message: types.Message, state: FSMContext):
         await state.clear()
         parts = message.text.split()
-        if len(parts) < 2:
-            await message.answer("❌ Usage: `/set_rpc [RPC_URL]`")
-            return
-            
-        rpc_url = parts[1].strip()
-        if not rpc_url.startswith("http"):
-            await message.answer("❌ Invalid RPC URL. Must start with http:// or https://")
-            return
+        if len(parts) >= 2:
+            rpc_url = parts[1].strip()
+            if rpc_url.startswith("http"):
+                await self.db.update_user_state(str(message.from_user.id), custom_rpc_url=rpc_url)
+                await message.answer(f"⚡ *RPC Updated:* `{rpc_url[:30]}...`", parse_mode="Markdown")
+                return
 
-        user_id = str(message.from_user.id)
-        await self.db.update_user_state(user_id, custom_rpc_url=rpc_url)
-        await message.answer(f"🚀 *Custom RPC Configured!*\n\nI will now use `{rpc_url[:30]}...` for your wallet operations.", parse_mode="Markdown")
+        await message.answer("📡 *CUSTOM RPC WIZARD*\n\nPlease send your private Solana RPC URL.\n(Example: `https://mainnet.helius-rpc.com/?api-key=...`)", parse_mode="Markdown")
+        await state.set_state(SetupWizard.waiting_for_rpc_url)
+
+    async def wizard_rpc_url(self, message: types.Message, state: FSMContext):
+        rpc_url = message.text.strip()
+        if rpc_url.startswith("http"):
+            await self.db.update_user_state(str(message.from_user.id), custom_rpc_url=rpc_url)
+            await message.answer(f"⚡ *RPC Updated:* System linked to your private node.", reply_markup=self.get_dashboard_markup())
+            await state.clear()
+        else:
+            await message.answer("❌ Invalid URL. Please send a valid HTTP/HTTPS RPC endpoint.")
 
     async def settings_command(self, message: types.Message):
         await self.show_settings_menu(user_id=str(message.from_user.id))
