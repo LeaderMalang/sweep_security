@@ -112,6 +112,7 @@ class NotificationService:
         self.dp.message.register(self.panic_command, Command("panic"), StateFilter(None))
         self.dp.message.register(self.vault_command, Command("vault"), StateFilter(None))
         self.dp.message.register(self.status_command, Command("status"), StateFilter(None))
+        self.dp.message.register(self.wallets_command, Command("wallets"), StateFilter(None))
         self.dp.message.register(self.history_command, Command("history"), StateFilter(None))
         self.dp.message.register(self.health_command, Command("health"), StateFilter(None))
         self.dp.message.register(self.skim_command, Command("skim"), StateFilter(None))
@@ -413,9 +414,10 @@ class NotificationService:
         
         # Convert to dict for safe .get() access
         state = dict(row)
-        wallets = json.loads(state['monitored_wallets_json'] if state['monitored_wallets_json'] else '[]')
-        safe_wallet = state['safe_wallet_address'] or "Not Configured"
-        auto_def = "ON" if state['auto_defense'] else "OFF"
+        monitored = json.loads(state.get('monitored_wallets_json', '[]') if state.get('monitored_wallets_json') else '[]')
+        baits = json.loads(state.get('bait_wallets_json', '[]') if state.get('bait_wallets_json') else '[]')
+        safe_wallet = state.get('safe_wallet_address', "Not Configured")
+        auto_def = "ON" if state.get('auto_defense') else "OFF"
 
         # Gas Tank Health Check
         from utils.solana_client import SolanaClient
@@ -425,27 +427,64 @@ class NotificationService:
         if safe_wallet != "Not Configured":
             gas_bal = await sc.get_balance(safe_wallet, user_id=user_id)
             if gas_bal < 0.05:
-                gas_warning = "\n⚠️ *LOW GAS TANK:* Refill Safe Wallet to enable Jito Rescue."
+                gas_warning = "\n⚠️ *LOW GAS TANK:* Refill Safe Wallet."
 
         status_text = (
             f"🛡️ *Guardian Security Report*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"👤 Tier: *{state.get('subscription_tier', 'FREE').upper()}*\n"
-            f"🏦 Safe Wallet: `{safe_wallet[:6]}...{safe_wallet[-4:]}`\n"
-            f"⛽ Gas Balance: `{gas_bal} SOL`{gas_warning}\n"
-            f"🤖 Auto-Defense: *{auto_def}*\n"
-            f"📡 RPC Requests: *{state.get('rpc_usage_count', 0)}*\n"
-            f"👀 Monitoring: `{len(wallets)}` Wallets\n"
+            f"🏦 Safe: `{safe_wallet[:6]}...{safe_wallet[-4:]}`\n"
+            f"⛽ Gas: `{gas_bal} SOL`{gas_warning}\n"
+            f"🤖 Defense: *{auto_def}*\n"
+            f"📡 Requests: *{state.get('rpc_usage_count', 0)}*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"👀 *Monitoring:* {len(monitored)} Wallets\n"
         )
-        for addr in wallets:
-            from utils.solana_client import SolanaClient
-            sc = SolanaClient(db=self.db)
+        for addr in monitored[:3]: # Show first 3
             bal = await sc.get_balance(addr, user_id=user_id)
             status_text += f"• `{addr[:8]}...`: `{bal} SOL`\n"
+            
+        if len(monitored) > 3: status_text += "• ... (Use /wallets for full list)\n"
+
+        status_text += f"\n🍯 *Honey Pot Network:* {len(baits)} Wallets\n"
+        for addr in baits[:3]:
+            bal = await sc.get_balance(addr, user_id=user_id)
+            status_text += f"• `{addr[:8]}...`: `{bal} SOL`\n"
+
+        if len(baits) > 3: status_text += "• ... (Use /wallets for full list)\n"
+        status_text += "━━━━━━━━━━━━━━━━━━━━"
+
         await message.answer(status_text, parse_mode="Markdown")
 
-    async def remove_wallet_command(self, message: types.Message):
+    async def wallets_command(self, message: types.Message):
+        user_id = str(message.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        if not row: return
+        
+        state = dict(row)
+        monitored = json.loads(state.get('monitored_wallets_json', '[]') or '[]')
+        baits = json.loads(state.get('bait_wallets_json', '[]') or '[]')
+        
+        from utils.solana_client import SolanaClient
+        sc = SolanaClient(db=self.db)
+        
+        report = "📋 *FULL FLEET INVENTORY*\n"
+        report += "━━━━━━━━━━━━━━━━━━━━\n"
+        
+        report += "👀 *PROTECTED WALLETS*\n"
+        for addr in monitored:
+            bal = await sc.get_balance(addr, user_id=user_id)
+            report += f"• `{addr}`\n  Balance: `{bal} SOL`\n"
+        if not monitored: report += "_No wallets protected._\n"
+
+        report += "\n🍯 *BAIT WALLETS (SKIMMING)*\n"
+        for addr in baits:
+            bal = await sc.get_balance(addr, user_id=user_id)
+            report += f"• `{addr}`\n  Balance: `{bal} SOL`\n"
+        if not baits: report += "_No bait configured._\n"
+        
+        report += "━━━━━━━━━━━━━━━━━━━━"
+        await message.answer(report, parse_mode="Markdown")
         parts = message.text.split()
         if len(parts) < 2:
             await message.answer("❌ Usage: `/remove_wallet [Address]`")
@@ -670,7 +709,8 @@ class NotificationService:
         from aiogram.types import BotCommand
         await self.bot.set_my_commands([
             BotCommand(command="start", description="Open Security Dashboard"),
-            BotCommand(command="status", description="Check Balances & Setup"),
+            BotCommand(command="status", description="Check Overview & Stats"),
+            BotCommand(command="wallets", description="📋 Full Fleet Inventory"),
             BotCommand(command="panic", description="🚨 GLOBAL EMERGENCY SWEEP"),
             BotCommand(command="settings", description="Configure Defense Modes"),
             BotCommand(command="vault", description="🔒 Securely Store Private Key"),
