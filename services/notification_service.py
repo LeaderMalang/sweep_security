@@ -14,6 +14,7 @@ class SetupWizard(StatesGroup):
     waiting_for_rpc = State()
     waiting_for_skim_retain = State()
     waiting_for_skim_threshold = State()
+    waiting_for_skim_addresses = State()
 
 class NotificationService:
     def __init__(self, db=None, emergency_service=None):
@@ -76,6 +77,7 @@ class NotificationService:
         self.dp.message.register(self.wizard_rpc_config, SetupWizard.waiting_for_rpc)
         self.dp.message.register(self.wizard_skim_retain, SetupWizard.waiting_for_skim_retain)
         self.dp.message.register(self.wizard_skim_threshold, SetupWizard.waiting_for_skim_threshold)
+        self.dp.message.register(self.wizard_skim_addresses, SetupWizard.waiting_for_skim_addresses)
 
         @self.dp.callback_query(F.data == "toggle_refill")
         async def handle_toggle_refill(callback: types.CallbackQuery):
@@ -284,9 +286,10 @@ class NotificationService:
     async def wizard_monitored_wallet(self, message: types.Message, state: FSMContext):
         raw_input = message.text.replace(",", " ").split()
         user_id = str(message.from_user.id)
-        db_state = await self.db.get_user_state(user_id)
-        wallets = json.loads(db_state['monitored_wallets_json'] if db_state and db_state['monitored_wallets_json'] else '[]')
-        tier = db_state.get('subscription_tier', 'free') if db_state else 'free'
+        row = await self.db.get_user_state(user_id)
+        db_state = dict(row) if row else {}
+        wallets = json.loads(db_state.get('monitored_wallets_json', '[]') or '[]')
+        tier = db_state.get('subscription_tier', 'free')
         is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
 
         from solders.pubkey import Pubkey
@@ -602,8 +605,9 @@ class NotificationService:
             return
             
         user_id = str(message.from_user.id)
-        db_state = await self.db.get_user_state(user_id)
-        bait_list = json.loads(db_state.get('bait_wallets_json', '[]') if db_state else '[]')
+        row = await self.db.get_user_state(user_id)
+        db_state = dict(row) if row else {}
+        bait_list = json.loads(db_state.get('bait_wallets_json', '[]') or '[]')
         
         from solders.pubkey import Pubkey
         added = []
@@ -659,10 +663,39 @@ class NotificationService:
             user_id = str(message.from_user.id)
             
             await self.db.update_user_state(user_id, skimming_retain=retain, skimming_threshold=threshold, skimming_enabled=True)
-            await message.answer(f"🍯 *Auto-Skimming ARMED!*\n\n💰 I will keep `{retain} SOL` as bait and harvest everything above `{threshold} SOL` automatically.")
-            await state.clear()
+            
+            db_state = await self.db.get_user_state(user_id)
+            baits = json.loads(db_state.get('bait_wallets_json', '[]') or '[]')
+            
+            if not baits:
+                await message.answer(f"🍯 *Auto-Skimming Configured!*\n\n💰 Logic: Keep `{retain} SOL`, harvest above `{threshold} SOL`.\n\n⚠️ *FINAL STEP:* Please send the **Solana Wallet Address(es)** you want to use as bait.\n(You can send multiple separated by spaces or commas).")
+                await state.set_state(SetupWizard.waiting_for_skim_addresses)
+            else:
+                await message.answer(f"🍯 *Auto-Skimming ARMED!*\n\n💰 Keeping `{retain} SOL` and harvesting everything above `{threshold} SOL` on your existing baits.")
+                await state.clear()
         except ValueError:
             await message.answer("❌ Please send a valid number (e.g., 0.05).")
+
+    async def wizard_skim_addresses(self, message: types.Message, state: FSMContext):
+        raw_input = message.text.replace(",", " ").split()
+        user_id = str(message.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        db_state = dict(row) if row else {}
+        bait_list = json.loads(db_state.get('bait_wallets_json', '[]') or '[]')
+        
+        from solders.pubkey import Pubkey
+        added = []
+        for address in raw_input:
+            try:
+                Pubkey.from_string(address)
+                if address not in bait_list:
+                    bait_list.append(address)
+                    added.append(address)
+            except: pass
+
+        await self.db.update_user_state(user_id, bait_wallets_json=json.dumps(bait_list))
+        await message.answer(f"✅ *Honey Pot Network Updated!*\nAdded `{len(added)}` bait wallets. Skimming is now 100% active!")
+        await state.clear()
 
     async def settings_command(self, message: types.Message):
         await self.show_settings_menu(user_id=str(message.from_user.id))
