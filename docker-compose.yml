@@ -1,19 +1,30 @@
 version: '3.8'
 
 services:
-  backend:
+  # Guardian Bot Backend (Phases 1-33)
+  guardian-backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
+    container_name: guardian-backend
+    restart: unless-stopped
     env_file: .env
     volumes:
       - ./guardian.db:/app/guardian.db
-    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
 
-  dashboard:
+  # Guardian Bot Dashboard (SaaS Interface)
+  guardian-dashboard:
     build:
       context: .
       dockerfile: Dockerfile.frontend
+    container_name: guardian-dashboard
+    restart: unless-stopped
     ports:
-      - "80:80"
-    restart: always
+      - "8081:80"  # Mapping to 8081 since 8080 is taken
+    depends_on:
+      - guardian-backend
