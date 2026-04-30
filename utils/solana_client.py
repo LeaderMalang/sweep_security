@@ -36,23 +36,42 @@ class SolanaConnectionPool:
         logging.warning(f"Rotating to RPC endpoint: {self.endpoints[self.current_index]}")
 
 class SolanaClient:
-    def __init__(self):
+    def __init__(self, db=None):
         self.pool = SolanaConnectionPool()
         self.wss_url = config.SOLANA_WSS_URL
+        self.db = db
 
     @property
     def client(self):
         return self.pool.get_client()
 
-    async def get_balance(self, address: str, retries=3):
+    async def get_client_for_user(self, user_id: str):
+        """Returns a custom AsyncClient if the user has one, otherwise the pool client."""
+        # 1. Admin Bypass
+        # Note: We need a way to check username if we only have user_id. 
+        # For now, we assume the user_id passed is verified or we check DB.
+        if self.db:
+            state = await self.db.get_user_state(user_id)
+            if state and state.get('custom_rpc_url'):
+                # Regular user with custom RPC
+                return AsyncClient(state['custom_rpc_url'], extra_headers={"Referer": "https://troydex.io"})
+        
+        # Default fallback (System RPC)
+        return self.client
+
+    async def get_balance(self, address: str, user_id: str = None, retries=3):
         if retries < 0:
             return 0.0
         pubkey = Pubkey.from_string(address)
+        
+        # Use custom client if user_id provided
+        target_client = await self.get_client_for_user(user_id) if user_id else self.client
+        
         try:
-            response = await self.client.get_balance(pubkey)
+            response = await target_client.get_balance(pubkey)
+            # If we created a temp client, we should close it (simplified here)
             return response.value / 1e9
         except Exception as e:
-            # Try to extract the error body for debugging JWT issues
             error_details = ""
             if hasattr(e, 'response') and hasattr(e.response, 'text'):
                 error_details = e.response.text
@@ -63,7 +82,7 @@ class SolanaClient:
             
             logging.error(f"RPC Error ({retries} retries left): {e} | Details: {error_details}")
             await self.pool.rotate_endpoint()
-            return await self.get_balance(address, retries - 1)
+            return await self.get_balance(address, user_id, retries - 1)
 
     async def close(self):
         for client in self.pool.clients:

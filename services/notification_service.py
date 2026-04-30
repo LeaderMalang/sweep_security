@@ -4,6 +4,14 @@ from aiogram.filters import Command
 import config
 import logging
 import json
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+
+class SetupWizard(StatesGroup):
+    waiting_for_safe_wallet = State()
+    waiting_for_monitored_wallet = State()
+    waiting_for_vault_key = State()
+    waiting_for_rpc = State()
 
 class NotificationService:
     def __init__(self, db=None, emergency_service=None):
@@ -34,8 +42,9 @@ class NotificationService:
             await callback.answer(f"Auto-Defense {new_status}")
 
         @self.dp.callback_query(F.data == "change_safe")
-        async def handle_change_safe(callback: types.CallbackQuery):
+        async def handle_change_safe(callback: types.CallbackQuery, state: FSMContext):
             await callback.message.answer("🏦 Please send your new *Safe Wallet Address*:", parse_mode="Markdown")
+            await state.set_state(SetupWizard.waiting_for_safe_wallet)
             await callback.answer()
 
         @self.dp.callback_query(F.data == "ignore")
@@ -57,6 +66,12 @@ class NotificationService:
         async def handle_panic_confirm(callback: types.CallbackQuery):
             await self.panic_command(callback.message)
             await callback.answer()
+
+        # Register State Handlers
+        self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
+        self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
+        self.dp.message.register(self.wizard_vault_key, SetupWizard.waiting_for_vault_key)
+        self.dp.message.register(self.wizard_rpc_config, SetupWizard.waiting_for_rpc)
 
         @self.dp.callback_query(F.data == "toggle_skimming")
         async def handle_toggle_skimming(callback: types.CallbackQuery):
@@ -86,7 +101,16 @@ class NotificationService:
         self.dp.message.register(self.report_command, Command("report"))
         self.dp.message.register(self.test_attack_command, Command("test_attack"))
 
-    async def start_command(self, message: types.Message):
+    async def start_command(self, message: types.Message, state: FSMContext):
+        user_id = str(message.from_user.id)
+        db_state = await self.db.get_user_state(user_id)
+        
+        if not db_state or not db_state['safe_wallet_configured']:
+            await message.answer("🧙‍♂️ *WELCOME TO GUARDIAN NEXUS*\n\nI see you haven't configured your security perimeter yet. Let's start the **Startup Wizard**.", parse_mode="Markdown")
+            await message.answer("🏦 *STEP 1:* Please send your **Safe Wallet Address**.\n(This is where all rescued funds will be sent).")
+            await state.set_state(SetupWizard.waiting_for_safe_wallet)
+            return
+
         welcome_text = (
             "🛡️ *GUARDIAN NEXUS ULTRA-FRONTIER*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
@@ -112,6 +136,82 @@ class NotificationService:
         builder.row(types.InlineKeyboardButton(text="⚙️ Open Settings", callback_data="settings_menu"))
         builder.row(types.InlineKeyboardButton(text="🚨 GLOBAL PANIC 🚨", callback_data="panic_confirm"))
         await message.answer(welcome_text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+    # --- SETUP WIZARD HANDLERS ---
+
+    async def wizard_safe_wallet(self, message: types.Message, state: FSMContext):
+        address = message.text.strip()
+        user_id = str(message.from_user.id)
+        await self.db.update_user_state(user_id, safe_wallet_address=address, safe_wallet_configured=True)
+        await message.answer(f"✅ *Safe Wallet Saved:* `{address}`\n\n👀 *STEP 2:* Please send the **Wallet Address** you want me to monitor.", parse_mode="Markdown")
+        await state.set_state(SetupWizard.waiting_for_monitored_wallet)
+
+    async def wizard_monitored_wallet(self, message: types.Message, state: FSMContext):
+        address = message.text.strip()
+        user_id = str(message.from_user.id)
+        db_state = await self.db.get_user_state(user_id)
+        wallets = json.loads(db_state['monitored_wallets_json'] if db_state and db_state['monitored_wallets_json'] else '[]')
+        
+        if address not in wallets:
+            wallets.append(address)
+            await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(wallets))
+            await state.update_data(last_wallet=address)
+            await message.answer(f"✅ *Monitoring Wallet:* `{address}`\n\n🔒 *STEP 3:* Please send the **Private Key** for this wallet so I can rescue it in an emergency.\n(I will encrypt it immediately and delete your message).", parse_mode="Markdown")
+            await state.set_state(SetupWizard.waiting_for_vault_key)
+        else:
+            await message.answer("⚠️ Wallet already monitored. Send another or type /skip.")
+
+    async def wizard_vault_key(self, message: types.Message, state: FSMContext):
+        privkey = message.text.strip()
+        data = await state.get_data()
+        address = data.get('last_wallet')
+        
+        try:
+            await message.delete()
+        except Exception: pass
+
+        from utils.encryption_utils import EncryptionManager
+        encryptor = EncryptionManager(config.ENCRYPTION_KEY)
+        encrypted = encryptor.encrypt(privkey)
+        await self.db.store_vault_key(address, encrypted)
+        
+        await message.answer(f"🔒 *Key Secured!* (Original message deleted).\n\n📡 *FINAL STEP:* Please send your **Solana RPC URL** (All That Node, Helius, etc).")
+        
+        # Admin Bypass
+        if message.from_user.username == "Leadermalang0":
+            builder = InlineKeyboardBuilder()
+            builder.row(types.InlineKeyboardButton(text="⚡ Use Admin Default RPC", callback_data="wizard_admin_rpc"))
+            await message.answer("🛡️ *Admin Detected:* You can use the high-speed system RPC instead of providing your own.", reply_markup=builder.as_markup())
+        
+        await state.set_state(SetupWizard.waiting_for_rpc)
+
+    async def wizard_rpc_config(self, message: types.Message, state: FSMContext):
+        rpc_url = message.text.strip()
+        user_id = str(message.from_user.id)
+        
+        await message.answer("📡 *Validating RPC Endpoint...*")
+        
+        # Ping RPC
+        from solana.rpc.async_api import AsyncClient
+        try:
+            temp_client = AsyncClient(rpc_url)
+            await temp_client.get_health()
+            await temp_client.close()
+            
+            await self.db.update_user_state(user_id, custom_rpc_url=rpc_url)
+            await message.answer("✅ *RPC Validated!* Your Guardian is now fully armed.\nUse /status to see your profile.")
+            await state.clear()
+        except Exception as e:
+            await message.answer(f"❌ *INVALID RPC:* Could not connect to that endpoint.\nError: `{str(e)[:50]}...`\n\nPlease send a working **Solana RPC URL**.")
+
+    @self.dp.callback_query(F.data == "wizard_admin_rpc")
+    async def handle_wizard_admin_rpc(callback: types.CallbackQuery, state: FSMContext):
+        user_id = str(callback.from_user.id)
+        await self.db.update_user_state(user_id, custom_rpc_url=config.SOLANA_RPC_URL)
+        await callback.message.edit_text("⚡ *Admin Mode Active:* System RPC linked to your account.")
+        await callback.message.answer("🎉 *Setup Complete!* Welcome back, Leader.")
+        await state.clear()
+        await callback.answer()
 
     async def panic_command(self, message: types.Message):
         user_id = str(message.from_user.id)
@@ -159,8 +259,8 @@ class NotificationService:
         )
         for addr in wallets:
             from utils.solana_client import SolanaClient
-            sc = SolanaClient()
-            bal = await sc.get_balance(addr)
+            sc = SolanaClient(db=self.db)
+            bal = await sc.get_balance(addr, user_id=user_id)
             status_text += f"• `{addr[:8]}...`: `{bal} SOL`\n"
         await message.answer(status_text, parse_mode="Markdown")
 

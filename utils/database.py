@@ -50,7 +50,8 @@ class Database:
                     monitored_wallets_json TEXT DEFAULT '[]',
                     skimming_enabled BOOLEAN DEFAULT FALSE,
                     skimming_threshold REAL DEFAULT 0.02,
-                    skimming_retain REAL DEFAULT 0.01
+                    skimming_retain REAL DEFAULT 0.01,
+                    custom_rpc_url TEXT
                 )
             ''')
             # Secure Wallet Vault
