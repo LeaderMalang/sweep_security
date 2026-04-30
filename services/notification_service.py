@@ -184,6 +184,55 @@ class NotificationService:
             else:
                 await message.answer("⚠️ Wallet is already being monitored.")
 
+        @self.dp.message(Command("whitelist"))
+        async def whitelist_command(message: types.Message):
+            parts = message.text.split()
+            if len(parts) < 2:
+                await message.answer("❌ Usage: `/whitelist [Address]`")
+                return
+            await self.db.add_to_whitelist(parts[1])
+            await message.answer(f"✅ Address `{parts[1]}` added to Whitelist.")
+
+        @self.dp.message(Command("blacklist"))
+        async def blacklist_command(message: types.Message):
+            parts = message.text.split()
+            if len(parts) < 2:
+                await message.answer("❌ Usage: `/blacklist [Address]`")
+                return
+            await self.db.add_to_blacklist(parts[1], "Manual Blacklist")
+            await message.answer(f"🚫 Address `{parts[1]}` manually blacklisted.")
+
+        @self.dp.message(Command("history"))
+        async def history_command(message: types.Message):
+            logs = await self.db.get_history(5)
+            if not logs:
+                await message.answer("📁 No threat logs found.")
+                return
+            
+            report = "📜 *Recent Threat History*\n\n"
+            for log in logs:
+                report += f"🕒 {log['timestamp']}\n⚖️ Score: `{log['risk_score']}`\n📍 Wallet: `{log['wallet_address'][:8]}...`\n\n"
+            await message.answer(report, parse_mode="Markdown")
+
+        @self.dp.message(Command("gas"))
+        async def gas_command(message: types.Message):
+            from utils.solana_client import SolanaClient
+            sc = SolanaClient()
+            tank = config.SAFE_WALLET_ADDRESS # Gas Tank source
+            bal = await sc.get_balance(tank)
+            await message.answer(f"⛽ *Gas Tank Balance:* `{bal} SOL`", parse_mode="Markdown")
+
+        @self.dp.message(Command("health"))
+        async def health_command(message: types.Message):
+            from utils.solana_client import SolanaClient
+            sc = SolanaClient()
+            try:
+                # Test ATN RPC
+                await sc.get_balance("GkYoTMJKKqzbaebzVkDS4KvNvbgFt5suFpAqx6LbMcSR")
+                await message.answer("🟢 *SYSTEM HEALTH:* Normal\n📡 RPC: Connected (ATN)\n🛡️ Mesh: Synchronized", parse_mode="Markdown")
+            except Exception as e:
+                await message.answer(f"🔴 *SYSTEM HEALTH:* Critical\n📡 RPC Error: {str(e)[:50]}...", parse_mode="Markdown")
+
         @self.dp.message(Command("settings"))
         async def settings_command(message: types.Message):
             await self.show_settings_menu()

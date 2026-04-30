@@ -27,6 +27,14 @@ class Database:
                     added_at DATETIME DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            # Whitelist (Trusted Addresses)
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS whitelist (
+                    address TEXT PRIMARY KEY,
+                    label TEXT,
+                    added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             # User state for hygiene and SaaS tiers
             await db.execute('''
                 CREATE TABLE IF NOT EXISTS user_state (
@@ -112,6 +120,26 @@ class Database:
                 (address.lower(), reason)
             )
             await db.commit()
+
+    async def add_to_whitelist(self, address, label="Trusted"):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT OR IGNORE INTO whitelist (address, label) VALUES (?, ?)",
+                (address, label)
+            )
+            await db.commit()
+
+    async def get_whitelist(self):
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT address FROM whitelist") as cursor:
+                rows = await cursor.fetchall()
+                return [row[0] for row in rows]
+
+    async def get_history(self, limit=5):
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM threat_logs ORDER BY timestamp DESC LIMIT ?", (limit,)) as cursor:
+                return await cursor.fetchall()
 
     async def get_blacklist(self):
         async with aiosqlite.connect(self.db_path) as db:
