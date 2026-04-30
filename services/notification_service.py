@@ -56,12 +56,12 @@ class NotificationService:
 
         @self.dp.callback_query(F.data == "status_refresh")
         async def handle_status_refresh(callback: types.CallbackQuery):
-            await self.status_command(callback.message)
+            await self.status_command(callback.message, user_id_override=str(callback.from_user.id))
             await callback.answer()
 
         @self.dp.callback_query(F.data == "settings_menu")
         async def handle_settings_menu(callback: types.CallbackQuery):
-            await self.show_settings_menu()
+            await self.show_settings_menu(user_id=str(callback.from_user.id))
             await callback.answer()
 
         @self.dp.callback_query(F.data == "panic_confirm")
@@ -122,6 +122,7 @@ class NotificationService:
         self.dp.message.register(self.set_tip_command, Command("set_tip"), StateFilter(None))
         self.dp.message.register(self.add_monitored_command, Command("add_monitored"), StateFilter(None))
         self.dp.message.register(self.add_bait_command, Command("add_bait"), StateFilter(None))
+        self.dp.message.register(self.remove_wallet_command, Command("remove_wallet"), StateFilter(None))
 
         # Register Wizard Handlers with strict states
         self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
@@ -405,8 +406,11 @@ class NotificationService:
         await self.db.store_vault_key(address, encrypted)
         await message.answer(f"🔒 *SECURE VAULT:* Key for `{address[:8]}...` encrypted and saved. (Original message deleted)", parse_mode="Markdown")
 
-    async def status_command(self, message: types.Message):
-        user_id = str(message.from_user.id)
+    async def status_command(self, message: types.Message, user_id_override: str = None):
+        user_id = user_id_override or str(message.from_user.id)
+        
+        # Security: If called from a callback, ensure we use the actual human user's ID
+        # (In aiogram, callback.message.from_user is the bot)
         row = await self.db.get_user_state(user_id)
         if not row:
             await message.answer("❌ No user profile found. Use /start.")
@@ -414,8 +418,12 @@ class NotificationService:
         
         # Convert to dict for safe .get() access
         state = dict(row)
-        monitored = json.loads(state.get('monitored_wallets_json', '[]') if state.get('monitored_wallets_json') else '[]')
-        baits = json.loads(state.get('bait_wallets_json', '[]') if state.get('bait_wallets_json') else '[]')
+        mon_raw = state.get('monitored_wallets_json')
+        bait_raw = state.get('bait_wallets_json')
+        
+        monitored = json.loads(mon_raw) if mon_raw and mon_raw != 'None' else []
+        baits = json.loads(bait_raw) if bait_raw and bait_raw != 'None' else []
+        
         safe_wallet = state.get('safe_wallet_address', "Not Configured")
         auto_def = "ON" if state.get('auto_defense') else "OFF"
 
@@ -456,14 +464,19 @@ class NotificationService:
 
         await message.answer(status_text, parse_mode="Markdown")
 
-    async def wallets_command(self, message: types.Message):
-        user_id = str(message.from_user.id)
+    async def wallets_command(self, message: types.Message, user_id_override: str = None):
+        user_id = user_id_override or str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
-        if not row: return
+        if not row:
+            await message.answer("❌ No user profile found. Use /start.")
+            return
         
         state = dict(row)
-        monitored = json.loads(state.get('monitored_wallets_json', '[]') or '[]')
-        baits = json.loads(state.get('bait_wallets_json', '[]') or '[]')
+        monitored_raw = state.get('monitored_wallets_json')
+        baits_raw = state.get('bait_wallets_json')
+        
+        monitored = json.loads(monitored_raw) if monitored_raw and monitored_raw != 'None' else []
+        baits = json.loads(baits_raw) if baits_raw and baits_raw != 'None' else []
         
         from utils.solana_client import SolanaClient
         sc = SolanaClient(db=self.db)
@@ -485,20 +498,37 @@ class NotificationService:
         
         report += "━━━━━━━━━━━━━━━━━━━━"
         await message.answer(report, parse_mode="Markdown")
+
+    async def remove_wallet_command(self, message: types.Message):
         parts = message.text.split()
         if len(parts) < 2:
             await message.answer("❌ Usage: `/remove_wallet [Address]`")
             return
-        address, user_id = parts[1], str(message.from_user.id)
-        state = await self.db.get_user_state(user_id)
-        wallets = json.loads(state['monitored_wallets_json'] if state['monitored_wallets_json'] else '[]')
-        if address in wallets:
-            wallets.remove(address)
-            await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(wallets))
+        
+        address = parts[1].strip()
+        user_id = str(message.from_user.id)
+        db_state = await self.db.get_user_state(user_id)
+        if not db_state: return
+
+        monitored = json.loads(db_state.get('monitored_wallets_json') or '[]')
+        baits = json.loads(db_state.get('bait_wallets_json') or '[]')
+        
+        removed = False
+        if address in monitored:
+            monitored.remove(address)
             await self.db.delete_vault_key(address)
-            await message.answer(f"🗑️ Wallet `{address}` removed from monitoring and vault.")
+            removed = True
+        if address in baits:
+            baits.remove(address)
+            removed = True
+            
+        if removed:
+            await self.db.update_user_state(user_id, 
+                                          monitored_wallets_json=json.dumps(monitored),
+                                          bait_wallets_json=json.dumps(baits))
+            await message.answer(f"✅ Wallet `{address[:10]}...` removed from all lists.")
         else:
-            await message.answer("❌ Wallet not found in your monitored list.")
+            await message.answer(f"❓ Wallet `{address[:10]}...` not found in your inventory.")
 
     async def set_safe_command(self, message: types.Message):
         parts = message.text.split()
@@ -635,7 +665,7 @@ class NotificationService:
             await message.answer("❌ Please send a valid number (e.g., 0.05).")
 
     async def settings_command(self, message: types.Message):
-        await self.show_settings_menu()
+        await self.show_settings_menu(user_id=str(message.from_user.id))
 
     async def report_command(self, message: types.Message):
         await message.answer("📢 Use the Dashboard or /report_center to see official links.")
@@ -662,8 +692,8 @@ class NotificationService:
 
         await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown", reply_markup=builder.as_markup())
 
-    async def show_settings_menu(self):
-        user_id = str(config.TELEGRAM_CHAT_ID)
+    async def show_settings_menu(self, user_id: str = None):
+        user_id = user_id or str(config.TELEGRAM_CHAT_ID)
         state = await self.db.get_user_state(user_id)
         if not state: return
         
@@ -715,6 +745,7 @@ class NotificationService:
             BotCommand(command="settings", description="Configure Defense Modes"),
             BotCommand(command="vault", description="🔒 Securely Store Private Key"),
             BotCommand(command="add_monitored", description="Add Wallet to Watch-list"),
+            BotCommand(command="remove_wallet", description="🗑️ Remove Wallet from Lists"),
             BotCommand(command="add_bait", description="🍯 Bulk Add Bait Wallets"),
             BotCommand(command="set_safe", description="Set Rescue Destination"),
             BotCommand(command="skim", description="🍯 Configure Auto-Harvesting"),
