@@ -17,8 +17,14 @@ class HoneyPotManager:
             return
 
         logging.info(f"Starting Honey Pot Network with {len(self.honey_pots)} wallets.")
+        from utils.atn_auth import get_atn_jwt
+        token = get_atn_jwt()
+        headers = {
+            "Authorization": f"Bearer {token}" if token else "",
+            "Referer": "https://troydex.io"
+        }
         
-        async with websockets.connect(config.SOLANA_WSS_URL) as websocket:
+        async with websockets.connect(config.SOLANA_WSS_URL, extra_headers=headers) as websocket:
             for wallet in self.honey_pots:
                 subscribe_msg = {
                     "jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
