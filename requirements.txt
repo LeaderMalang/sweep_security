@@ -1,0 +1,12 @@
+solders
+solana
+web3
+aiogram
+aiosqlite
+cryptography
+python-dotenv
+httpx
+websockets
+base58
+recharts-ready
+framer-motion-ready
