@@ -123,27 +123,45 @@ class NotificationService:
             await state.clear()
             await callback.answer()
 
-        # Bind Command Handlers
-        self.dp.message.register(self.start_command, Command("start"), StateFilter(None))
-        self.dp.message.register(self.panic_command, Command("panic"), StateFilter(None))
-        self.dp.message.register(self.vault_command, Command("vault"), StateFilter(None))
-        self.dp.message.register(self.status_command, Command("status"), StateFilter(None))
-        self.dp.message.register(self.wallets_command, Command("wallets"), StateFilter(None))
-        self.dp.message.register(self.history_command, Command("history"), StateFilter(None))
-        self.dp.message.register(self.health_command, Command("health"), StateFilter(None))
-        self.dp.message.register(self.skim_command, Command("skim"), StateFilter(None))
-        self.dp.message.register(self.settings_command, Command("settings"), StateFilter(None))
-        self.dp.message.register(self.faq_command, Command("faq"), StateFilter(None))
-        self.dp.message.register(self.recommend_command, Command("recommend"), StateFilter(None))
-        self.dp.message.register(self.premium_command, Command("premium"), StateFilter(None))
-        self.dp.message.register(self.set_tip_command, Command("set_tip"), StateFilter(None))
-        self.dp.message.register(self.set_rpc_command, Command("set_rpc"), StateFilter(None))
-        self.dp.message.register(self.set_gas_key_command, Command("set_gas_key"), StateFilter(None))
-        self.dp.message.register(self.add_monitored_command, Command("add_monitored"), StateFilter(None))
-        self.dp.message.register(self.add_bait_command, Command("add_bait"), StateFilter(None))
-        self.dp.message.register(self.remove_wallet_command, Command("remove_wallet"), StateFilter(None))
-        self.dp.message.register(self.set_daily_sweep_command, Command("set_daily_sweep"), StateFilter(None))
-        self.dp.message.register(self.toggle_smart_command, Command("toggle_smart"), StateFilter(None))
+        @self.dp.callback_query(F.data == "reset_confirm")
+        async def handle_reset_confirm(callback: types.CallbackQuery):
+            user_id = str(callback.from_user.id)
+            await self.db.update_user_state(
+                user_id,
+                monitored_wallets_json='[]',
+                bait_wallets_json='[]',
+                safe_wallet_address=None,
+                safe_wallet_configured=False,
+                custom_rpc_url=None,
+                auto_defense=False
+            )
+            await callback.message.edit_text("🗑️ *STATE WIPED:* All wallets and configurations have been deleted instantly.", parse_mode="Markdown")
+            await callback.answer("Data Deleted")
+
+        # Bind Command Handlers (Removed StateFilter(None) to allow overrides)
+        self.dp.message.register(self.start_command, Command("start"))
+        self.dp.message.register(self.panic_command, Command("panic"))
+        self.dp.message.register(self.vault_command, Command("vault"))
+        self.dp.message.register(self.status_command, Command("status"))
+        self.dp.message.register(self.wallets_command, Command("wallets"))
+        self.dp.message.register(self.history_command, Command("history"))
+        self.dp.message.register(self.health_command, Command("health"))
+        self.dp.message.register(self.skim_command, Command("skim"))
+        self.dp.message.register(self.settings_command, Command("settings"))
+        self.dp.message.register(self.faq_command, Command("faq"))
+        self.dp.message.register(self.recommend_command, Command("recommend"))
+        self.dp.message.register(self.premium_command, Command("premium"))
+        self.dp.message.register(self.set_tip_command, Command("set_tip"))
+        self.dp.message.register(self.set_rpc_command, Command("set_rpc"))
+        self.dp.message.register(self.set_safe_command, Command("set_safe"))
+        self.dp.message.register(self.set_gas_key_command, Command("set_gas_key"))
+        self.dp.message.register(self.add_monitored_command, Command("add_monitored"))
+        self.dp.message.register(self.add_bait_command, Command("add_bait"))
+        self.dp.message.register(self.remove_wallet_command, Command("remove_wallet"))
+        self.dp.message.register(self.set_daily_sweep_command, Command("set_daily_sweep"))
+        self.dp.message.register(self.toggle_smart_command, Command("toggle_smart"))
+        self.dp.message.register(self.cancel_command, Command("cancel"))
+        self.dp.message.register(self.reset_state_command, Command("reset_state"))
 
         # Register Wizard Handlers with strict states
         self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
@@ -327,6 +345,7 @@ class NotificationService:
         self.dp.message.register(self.test_attack_command, Command("test_attack"))
 
     async def set_gas_key_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         parts = message.text.split()
         if len(parts) >= 2:
             privkey = parts[1].strip()
@@ -365,6 +384,7 @@ class NotificationService:
             await message.answer(f"❌ Error: {str(e)}")
 
     async def start_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         user_id = str(message.from_user.id)
         db_state = await self.db.get_user_state(user_id)
         
@@ -392,6 +412,7 @@ class NotificationService:
         await message.answer(welcome_text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
     async def add_monitored_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         user_id = str(message.from_user.id)
         db_state = await self.db.get_user_state(user_id)
         
@@ -454,6 +475,10 @@ class NotificationService:
                     added.append(address)
             except: pass
 
+        if not added:
+            await message.answer("❌ *NO VALID WALLETS ADDED*\n\nPlease send valid Solana addresses.", parse_mode="Markdown")
+            return
+
         await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(wallets))
         await message.answer(f"✅ Added `{len(added)}` wallets to your fleet.\n\n🔐 *STEP 3:* Please send the **Private Key(s)** for these wallets.\n(You can send multiple keys separated by spaces or commas. I will match them automatically).")
         await state.set_state(SetupWizard.waiting_for_vault_key)
@@ -495,6 +520,7 @@ class NotificationService:
             await message.answer("❌ *SYSTEM ERROR:* Emergency Service offline.")
 
     async def vault_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         parts = message.text.split()
         if len(parts) >= 3:
             address, privkey = parts[1], parts[2]
@@ -511,9 +537,14 @@ class NotificationService:
 
     async def wizard_vault_address(self, message: types.Message, state: FSMContext):
         address = message.text.strip()
-        await state.update_data(vault_address=address)
-        await message.answer(f"✅ Address `{address[:8]}...` received.\n\n👉 *STEP 2:* Now send the **Private Key** (Base58).\n_I will delete your message instantly for security._", parse_mode="Markdown")
-        await state.set_state(SetupWizard.waiting_for_vault_key)
+        from solders.pubkey import Pubkey
+        try:
+            Pubkey.from_string(address)
+            await state.update_data(vault_address=address)
+            await message.answer(f"✅ Address `{address[:8]}...` received.\n\n👉 *STEP 2:* Now send the **Private Key** (Base58).\n_I will delete your message instantly for security._", parse_mode="Markdown")
+            await state.set_state(SetupWizard.waiting_for_vault_key)
+        except ValueError:
+            await message.answer("❌ *INVALID ADDRESS*\n\nPlease send a valid **Solana Wallet Address**.", parse_mode="Markdown")
 
     async def wizard_vault_key_guided(self, message: types.Message, state: FSMContext):
         privkey = message.text.strip()
@@ -531,7 +562,8 @@ class NotificationService:
         await self.db.store_vault_key(address, encrypted)
         await message.answer(f"🔒 *SECURE VAULT:* Key for `{address[:8]}...` encrypted and saved.", reply_markup=self.get_dashboard_markup())
 
-    async def status_command(self, message: types.Message, user_id_override: str = None):
+    async def status_command(self, message: types.Message, state: FSMContext = None, user_id_override: str = None):
+        if state: await state.clear()
         user_id = user_id_override or str(message.from_user.id)
         
         # Security: If called from a callback, ensure we use the actual human user's ID
@@ -589,7 +621,8 @@ class NotificationService:
 
         await message.answer(status_text, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
-    async def wallets_command(self, message: types.Message, user_id_override: str = None):
+    async def wallets_command(self, message: types.Message, state: FSMContext = None, user_id_override: str = None):
+        if state: await state.clear()
         user_id = user_id_override or str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
         if not row:
@@ -625,6 +658,7 @@ class NotificationService:
         await message.answer(report, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
     async def remove_wallet_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         parts = message.text.split()
         if len(parts) >= 2:
             address = parts[1].strip()
@@ -641,8 +675,13 @@ class NotificationService:
 
     async def wizard_remove_wallet(self, message: types.Message, state: FSMContext):
         address = message.text.strip()
-        await self._process_wallet_removal(message, address)
-        await state.clear()
+        from solders.pubkey import Pubkey
+        try:
+            Pubkey.from_string(address)
+            await self._process_wallet_removal(message, address)
+            await state.clear()
+        except ValueError:
+            await message.answer("❌ Invalid Solana Address.")
 
     async def _process_wallet_removal(self, message, address):
         user_id = str(message.from_user.id)
@@ -670,14 +709,39 @@ class NotificationService:
         else:
             await message.answer(f"❓ Wallet `{address[:10]}...` not found.", reply_markup=self.get_dashboard_markup())
 
-    async def set_safe_command(self, message: types.Message):
+    async def set_safe_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         parts = message.text.split()
         if len(parts) < 2:
             await message.answer("❌ Usage: `/set_safe [Solana_Address]`", parse_mode="Markdown")
             return
-        address, user_id = parts[1], str(message.from_user.id)
-        await self.db.update_user_state(user_id, safe_wallet_address=address, safe_wallet_configured=True)
-        await message.answer(f"✅ *Safe Wallet Saved:* `{address}`", parse_mode="Markdown")
+        address = parts[1].strip()
+        from solders.pubkey import Pubkey
+        try:
+            Pubkey.from_string(address)
+            user_id = str(message.from_user.id)
+            await self.db.update_user_state(user_id, safe_wallet_address=address, safe_wallet_configured=True)
+            await message.answer(f"✅ *Safe Wallet Saved:* `{address}`", parse_mode="Markdown")
+        except ValueError:
+            await message.answer("❌ Invalid Solana Address.")
+
+    async def cancel_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer("🛡️ *Operation Cancelled:* FSM state cleared.", parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
+
+    async def reset_state_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="🗑️ YES, DELETE EVERYTHING", callback_data="reset_confirm"))
+        builder.row(types.InlineKeyboardButton(text="❌ NO, KEEP DATA", callback_data="ignore"))
+        
+        await message.answer(
+            "⚠️ *CRITICAL ACTION: RESET DATA*\n\n"
+            "This will instantly delete all monitored wallets, bait wallets, and encrypted keys from your profile.\n\n"
+            "**Are you absolutely sure?**",
+            parse_mode="Markdown",
+            reply_markup=builder.as_markup()
+        )
 
     async def add_monitored_command(self, message: types.Message):
         parts = message.text.split()
@@ -710,7 +774,8 @@ class NotificationService:
         await self.db.add_to_blacklist(parts[1], "Manual Blacklist")
         await message.answer(f"🚫 Address `{parts[1]}` manually blacklisted.")
 
-    async def history_command(self, message: types.Message):
+    async def history_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         logs = await self.db.get_history(5)
         if not logs:
             await message.answer("📁 No threat logs found.")
@@ -723,7 +788,8 @@ class NotificationService:
         bal = await sc.get_balance(tank)
         await message.answer(f"⛽ *Gas Tank Balance:* `{bal} SOL`", parse_mode="Markdown")
 
-    async def health_command(self, message: types.Message):
+    async def health_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         from utils.solana_client import SolanaClient
         sc = SolanaClient()
         try:
@@ -733,6 +799,7 @@ class NotificationService:
             await message.answer(f"🔴 *SYSTEM HEALTH:* Critical\n📡 RPC Error: {str(e)[:50]}...", parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
     async def add_bait_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         raw_input = message.text.replace("/add_bait", " ").replace(",", " ").split()
         if raw_input:
             await self._process_bait_addition(message, raw_input)
@@ -768,10 +835,15 @@ class NotificationService:
                     added.append(address)
             except: pass
 
+        if not added:
+            await message.answer("❌ *NO VALID BAIT WALLETS ADDED*\n\nPlease send valid Solana addresses.", parse_mode="Markdown")
+            return
+
         await self.db.update_user_state(user_id, bait_wallets_json=json.dumps(bait_list))
         await message.answer(f"✅ *Honey Pot Updated:* Added `{len(added)}` bait wallets.", reply_markup=self.get_dashboard_markup())
 
     async def skim_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         parts = message.text.split()
         if len(parts) < 3:
             await message.answer("🍯 *AUTO-SKIMMING SETUP*\n\nLet's configure your harvesting. How much **SOL** should I leave in your bait wallet as a decoy?\n(Example: `0.01`)", parse_mode="Markdown")
@@ -837,7 +909,8 @@ class NotificationService:
         await message.answer(f"✅ *Honey Pot Network Updated!*\nAdded `{len(added)}` bait wallets. Skimming is now 100% active!")
         await state.clear()
 
-    async def set_rpc_command(self, message: types.Message):
+    async def set_rpc_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         parts = message.text.split()
         if len(parts) < 2:
             await message.answer("❌ Usage: `/set_rpc [RPC_URL]`")
@@ -910,9 +983,11 @@ class NotificationService:
         builder.row(types.InlineKeyboardButton(text="🕰️ Daily Harvest", callback_data="toggle_daily"))
         builder.row(types.InlineKeyboardButton(text="🧠 Smart Thresholds", callback_data="toggle_smart"))
         builder.row(types.InlineKeyboardButton(text="🏦 Change Safe Wallet", callback_data="change_safe"))
+        builder.row(types.InlineKeyboardButton(text="🗑️ RESET ALL DATA", callback_data="reset_confirm"))
         await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown", reply_markup=builder.as_markup())
 
-    async def set_tip_command(self, message: types.Message):
+    async def set_tip_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         parts = message.text.split()
         if len(parts) < 2:
             await message.answer("❌ Usage: `/set_tip [Amount]`\nExample: `/set_tip 0.005`", parse_mode="Markdown")
@@ -925,7 +1000,8 @@ class NotificationService:
         except ValueError:
             await message.answer("❌ Please provide a valid tip amount (minimum 0.0001).")
 
-    async def set_daily_sweep_command(self, message: types.Message):
+    async def set_daily_sweep_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         parts = message.text.split()
         if len(parts) < 2:
             await message.answer("🕰️ *DAILY HARVEST SETUP*\n\nPlease provide a time in 24h format.\nExample: `/set_daily_sweep 08:30`", parse_mode="Markdown")
@@ -940,7 +1016,8 @@ class NotificationService:
         except ValueError:
             await message.answer("❌ Invalid time format. Use HH:MM (e.g., 23:45).")
 
-    async def toggle_smart_command(self, message: types.Message):
+    async def toggle_smart_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
         if not row: return
