@@ -101,20 +101,7 @@ class NotificationService:
             
             await message.answer(welcome_text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
-        # Register Menu Commands
-        from aiogram.types import BotCommand
-        await self.bot.set_my_commands([
-            BotCommand(command="start", description="Open Security Dashboard"),
-            BotCommand(command="status", description="Check Balances & Setup"),
-            BotCommand(command="panic", description="🚨 GLOBAL EMERGENCY SWEEP"),
-            BotCommand(command="settings", description="Configure Defense Modes"),
-            BotCommand(command="vault", description="🔒 Securely Store Private Key"),
-            BotCommand(command="add_monitored", description="Add Wallet to Watch-list"),
-            BotCommand(command="set_safe", description="Set Rescue Destination"),
-            BotCommand(command="skim", description="🍯 Configure Auto-Harvesting"),
-            BotCommand(command="history", description="📜 View Threat History"),
-            BotCommand(command="health", description="🟢 Check System Status")
-        ])
+
 
         @self.dp.message(Command("panic"))
         async def panic_command(message: types.Message):
@@ -346,4 +333,20 @@ class NotificationService:
 
     async def start(self):
         logging.info("Telegram Bot: Starting polling...")
+        
+        # Register Menu Commands
+        from aiogram.types import BotCommand
+        await self.bot.set_my_commands([
+            BotCommand(command="start", description="Open Security Dashboard"),
+            BotCommand(command="status", description="Check Balances & Setup"),
+            BotCommand(command="panic", description="🚨 GLOBAL EMERGENCY SWEEP"),
+            BotCommand(command="settings", description="Configure Defense Modes"),
+            BotCommand(command="vault", description="🔒 Securely Store Private Key"),
+            BotCommand(command="add_monitored", description="Add Wallet to Watch-list"),
+            BotCommand(command="set_safe", description="Set Rescue Destination"),
+            BotCommand(command="skim", description="🍯 Configure Auto-Harvesting"),
+            BotCommand(command="history", description="📜 View Threat History"),
+            BotCommand(command="health", description="🟢 Check System Status")
+        ])
+
         await self.dp.start_polling(self.bot)
