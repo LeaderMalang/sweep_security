@@ -56,7 +56,8 @@ class Database:
                     custom_rpc_url TEXT,
                     bait_wallets_json TEXT DEFAULT '[]',
                     subscription_tier TEXT DEFAULT 'free',
-                    subscription_expiry DATETIME
+                    subscription_expiry DATETIME,
+                    rpc_usage_count INTEGER DEFAULT 0
                 )
             ''')
             # Secure Wallet Vault
@@ -87,6 +88,14 @@ class Database:
     async def delete_vault_key(self, address):
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute("DELETE FROM wallet_vault WHERE wallet_address = ?", (address,))
+            await db.commit()
+
+    async def increment_rpc_usage(self, user_id):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "UPDATE user_state SET rpc_usage_count = rpc_usage_count + 1 WHERE user_id = ?",
+                (user_id,)
+            )
             await db.commit()
 
     async def update_user_tier(self, user_id, tier):

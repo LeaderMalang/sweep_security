@@ -56,6 +56,7 @@ class SolanaClient:
             is_premium = state['subscription_tier'] == 'premium'
             
             if is_admin or is_premium:
+                await self.db.increment_rpc_usage(user_id)
                 return self.client
 
             # 2. Regular user with custom RPC

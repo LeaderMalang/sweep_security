@@ -107,6 +107,7 @@ class NotificationService:
         self.dp.message.register(self.settings_command, Command("settings"), StateFilter(None))
         self.dp.message.register(self.faq_command, Command("faq"), StateFilter(None))
         self.dp.message.register(self.premium_command, Command("premium"), StateFilter(None))
+        self.dp.message.register(self.add_monitored_command, Command("add_monitored"), StateFilter(None))
 
         # Register Wizard Handlers with strict states
         self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
@@ -143,19 +144,23 @@ class NotificationService:
             "💎 *GUARDIAN NEXUS PREMIUM*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"Your Current Tier: *{current_tier}*\n\n"
-            "🚀 *UPGRADE TO GUARDIAN*\n"
-            "• **System RPC Access**: Use our high-speed nodes.\n"
-            "• **Priority Sweeping**: Jito-powered rescue speed.\n"
-            "• **Unlimited Monitoring**: Watch up to 50 wallets.\n"
-            "• **Community Intel**: Live threat blacklist.\n\n"
-            "💰 *PRICE:* `0.5 TON / Month`\n"
+            "🛡️ *1. SENTINEL (Free)*\n"
+            "• 1 Monitored Wallet\n"
+            "• Public RPC (Slower Rescue)\n\n"
+            "⚡ *2. LITE ($2 / Month)*\n"
+            "• **Unlimited Wallets**\n"
+            "• **Use Your Own RPC** (Custom URL)\n\n"
+            "🚀 *3. PRO ($10 / Month)*\n"
+            "• **Unlimited Wallets**\n"
+            "• **High-Speed System RPC Access**\n"
+            "• *Usage Tracking:* Charged based on RPC consumption.\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "Select your upgrade path below:"
         )
         
         builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="💎 Upgrade to Guardian (0.5 TON)", callback_data="buy_premium_ton"))
-        builder.row(types.InlineKeyboardButton(text="⭐ Upgrade with Stars (500 Stars)", callback_data="buy_premium_stars"))
+        builder.row(types.InlineKeyboardButton(text="⚡ Upgrade to LITE ($2)", callback_data="buy_lite_ton"))
+        builder.row(types.InlineKeyboardButton(text="🚀 Upgrade to PRO ($10)", callback_data="buy_pro_ton"))
         
         await message.answer(premium_text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
@@ -196,7 +201,8 @@ class NotificationService:
         user_id = str(message.from_user.id)
         db_state = await self.db.get_user_state(user_id)
         
-        if not db_state or not db_state['safe_wallet_configured']:
+        # Force Wizard if setup is incomplete
+        if not db_state or not db_state['safe_wallet_configured'] or not db_state['monitored_wallets_json']:
             await message.answer("🧙‍♂️ *WELCOME TO GUARDIAN NEXUS*\n\nI see you haven't configured your security perimeter yet. Let's start the **Startup Wizard**.", parse_mode="Markdown")
             await message.answer("🏦 *STEP 1:* Please send your **Safe Wallet Address**.\n(This is where all rescued funds will be sent).")
             await state.set_state(SetupWizard.waiting_for_safe_wallet)
@@ -205,28 +211,42 @@ class NotificationService:
         welcome_text = (
             "🛡️ *GUARDIAN NEXUS ULTRA-FRONTIER*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
-            "I am your automated security sentinel. I protect your Solana assets with sub-millisecond rescue logic.\n\n"
-            "📂 *SETUP COMMANDS*\n"
+            "Status: *ACTIVE & PROTECTING*\n"
+            f"Tier: *{db_state['subscription_tier'].upper()}*\n\n"
+            "📂 *COMMANDS*\n"
             "• /add_monitored - Watch a new wallet\n"
-            "• /set_safe - Set rescue destination\n"
-            "• /vault - Securely store private keys\n\n"
-            "🤖 *DEFENSE & HARVESTING*\n"
-            "• /settings - Toggle Auto-Defense\n"
-            "• /skim - Configure Bait Harvesting\n\n"
-            "🚨 *EMERGENCY*\n"
-            "• /panic - Global Rescue Sweep\n\n"
-            "📊 *INSIGHTS*\n"
-            "• /status - Live Balances & Setup\n"
-            "• /history - Recent Threat Logs\n"
-            "• /health - System & RPC Check\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "💡 *Tip:* Click the 'Menu' button to see all commands instantly."
+            "• /premium - Upgrade Tier & Speed\n"
+            "• /panic - Global Rescue Sweep\n"
+            "━━━━━━━━━━━━━━━━━━━━"
         )
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(text="📊 Show Status", callback_data="status_refresh"))
         builder.row(types.InlineKeyboardButton(text="⚙️ Open Settings", callback_data="settings_menu"))
-        builder.row(types.InlineKeyboardButton(text="🚨 GLOBAL PANIC 🚨", callback_data="panic_confirm"))
         await message.answer(welcome_text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+    async def add_monitored_command(self, message: types.Message, state: FSMContext):
+        user_id = str(message.from_user.id)
+        db_state = await self.db.get_user_state(user_id)
+        
+        if not db_state: return
+        
+        wallets = json.loads(db_state['monitored_wallets_json'] or '[]')
+        tier = db_state['subscription_tier']
+        is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
+        
+        # Tier Enforcement
+        if not is_admin and tier == 'free' and len(wallets) >= 1:
+            await message.answer(
+                "⚠️ *FREE TIER LIMIT REACHED*\n\n"
+                "Free users can only monitor **1 wallet**.\n\n"
+                "💎 *Upgrade to Lite ($2)* for unlimited monitoring with your own RPC.\n"
+                "🚀 *Upgrade to Pro ($10)* for unlimited monitoring + High-Speed System RPC.",
+                parse_mode="Markdown"
+            )
+            return
+
+        await message.answer("👀 Please send the **Wallet Address** you want me to monitor.", parse_mode="Markdown")
+        await state.set_state(SetupWizard.waiting_for_monitored_wallet)
 
     # --- SETUP WIZARD HANDLERS ---
 
@@ -363,10 +383,14 @@ class NotificationService:
         safe_wallet = state['safe_wallet_address'] or "Not Configured"
         auto_def = "ON" if state['auto_defense'] else "OFF"
         status_text = (
-            f"🛡️ *Guardian Status Update*\n\n"
-            f"🏦 *Safe Wallet:* `{safe_wallet}`\n"
-            f"🤖 *Auto-Defense:* `{auto_def}`\n"
-            f"👀 *Monitored Wallets:* {len(wallets)}\n"
+            f"🛡️ *Guardian Security Report*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 Tier: *{state['subscription_tier'].upper()}*\n"
+            f"🏦 Safe Wallet: `{safe_wallet[:6]}...{safe_wallet[-4:]}`\n"
+            f"🤖 Auto-Defense: *{auto_def}*\n"
+            f"📡 RPC Requests: *{state.get('rpc_usage_count', 0)}*\n"
+            f"👀 Monitoring: *{len(wallets)}* Wallets\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
         )
         for addr in wallets:
             from utils.solana_client import SolanaClient
