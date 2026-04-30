@@ -388,7 +388,7 @@ class NotificationService:
             f"👤 Tier: *{state['subscription_tier'].upper()}*\n"
             f"🏦 Safe Wallet: `{safe_wallet[:6]}...{safe_wallet[-4:]}`\n"
             f"🤖 Auto-Defense: *{auto_def}*\n"
-            f"📡 RPC Requests: *{state.get('rpc_usage_count', 0)}*\n"
+            f"📡 RPC Requests: *{state['rpc_usage_count']}*\n"
             f"👀 Monitoring: `{len(wallets)}` Wallets\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
         )
