@@ -43,7 +43,7 @@ async def get_stats():
         wallets = json.loads(u['monitored_wallets_json'] or '[]')
         wallet_count += len(wallets)
         if str(u['user_id']) == str(TELEGRAM_CHAT_ID):
-            admin_tier = u['subscription_tier']
+            admin_tier = "ADMIN"
     
     # Mock some realistic protected value based on wallet count
     protected_value = wallet_count * 1250 
@@ -54,7 +54,7 @@ async def get_stats():
         "vault_status": "LOCKED",
         "node_status": "ONLINE",
         "threat_level": "LOW",
-        "subscription_tier": admin_tier.upper()
+        "subscription_tier": admin_tier
     }
 
 @app.get("/api/wallets")

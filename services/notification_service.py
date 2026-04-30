@@ -113,11 +113,30 @@ class NotificationService:
         self.dp.message.register(self.settings_command, Command("settings"))
         self.dp.message.register(self.faq_command, Command("faq"))
         self.dp.message.register(self.premium_command, Command("premium"))
+        self.dp.callback_query.register(self.handle_buy_premium_ton, F.data == "buy_premium_ton")
 
     async def premium_command(self, message: types.Message):
         user_id = str(message.from_user.id)
+        is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
+        
         state = await self.db.get_user_state(user_id)
-        current_tier = state['subscription_tier'].upper() if state else "FREE"
+        current_tier = "ADMIN" if is_admin else (state['subscription_tier'].upper() if state else "FREE")
+
+        if is_admin:
+            premium_text = (
+                "👑 *GUARDIAN MASTER CONSOLE*\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "Status: *ADMIN BYPASS ACTIVE*\n\n"
+                "You have permanent access to all **Phase-Omega** features:\n"
+                "• Ultra-High-Speed System RPC\n"
+                "• Zero-Latency Jito Tip Engine\n"
+                "• Global Threat Network Master-View\n"
+                "• Unlimited Wallet Monitoring\n\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "🛡️ *Nexus Security Level: MAXIMUM*"
+            )
+            await message.answer(premium_text, parse_mode="Markdown")
+            return
 
         premium_text = (
             "💎 *GUARDIAN NEXUS PREMIUM*\n"
@@ -139,8 +158,7 @@ class NotificationService:
         
         await message.answer(premium_text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
-    @self.dp.callback_query(F.data == "buy_premium_ton")
-    async def handle_buy_premium_ton(callback: types.CallbackQuery):
+    async def handle_buy_premium_ton(self, callback: types.CallbackQuery):
         # Simplified: Show a payment address or connect wallet
         payment_addr = "UQDY7...YourTonWallet"
         await callback.message.edit_text(
