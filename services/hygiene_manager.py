@@ -20,23 +20,27 @@ class HygieneManager:
         user_id = config.TELEGRAM_CHAT_ID
         state = await self.db.get_user_state(user_id)
         
-        last_check = state['last_daily_check'] if state and state['last_daily_check'] else None
+        # Use named access for reliability
+        last_check = state['last_daily_check'] if state and 'last_daily_check' in state.keys() and state['last_daily_check'] else None
         
         should_prompt = False
         if not last_check:
             should_prompt = True
         else:
-            last_dt = datetime.fromisoformat(last_check)
-            if datetime.now() - last_dt > timedelta(hours=12):
+            try:
+                last_dt = datetime.fromisoformat(last_check)
+                if datetime.now() - last_dt > timedelta(hours=12):
+                    should_prompt = True
+            except ValueError:
                 should_prompt = True
 
         if should_prompt:
             await self.notification_service.send_status_update(
-                "🛡️ *DAILY HYGIENE CHECK*\n"
+                "🛡️ *DAILY HYGIENE CHECK*\n\n"
                 "Please confirm your current security status:\n"
-                "- Auto-lock is set to 5 min?\n"
-                "- Transaction simulation is ON?\n"
-                "- No new unknown connected apps?"
+                "• Auto-lock is set to 5 min?\n"
+                "• Transaction simulation is ON?\n"
+                "• No new unknown connected apps?"
             )
             await self.db.update_user_state(user_id, last_daily_check=datetime.now().isoformat())
 
@@ -44,14 +48,18 @@ class HygieneManager:
         user_id = config.TELEGRAM_CHAT_ID
         state = await self.db.get_user_state(user_id)
         
-        last_audit = state[4] if state and state[4] else None
+        # Use named access for reliability
+        last_audit = state['last_weekly_audit'] if state and 'last_weekly_audit' in state.keys() and state['last_weekly_audit'] else None
         
         should_prompt = False
         if not last_audit:
             should_prompt = True
         else:
-            last_dt = datetime.fromisoformat(last_audit)
-            if datetime.now() - last_dt > timedelta(days=7):
+            try:
+                last_dt = datetime.fromisoformat(last_audit)
+                if datetime.now() - last_dt > timedelta(days=7):
+                    should_prompt = True
+            except ValueError:
                 should_prompt = True
 
         if should_prompt:
@@ -63,7 +71,7 @@ class HygieneManager:
                 "⏳ 4. Change spending password\n"
                 "⏳ 5. Audit address book\n"
                 "⏳ 6. Scan device for keyloggers\n\n"
-                "Reply with /complete_audit once done."
+                "Reply with `/complete_audit` once done."
             )
             await self.notification_service.send_status_update(checklist)
             await self.db.update_user_state(user_id, last_weekly_audit=datetime.now().isoformat())
