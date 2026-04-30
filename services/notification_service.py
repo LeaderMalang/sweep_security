@@ -123,6 +123,7 @@ class NotificationService:
         self.dp.message.register(self.premium_command, Command("premium"), StateFilter(None))
         self.dp.message.register(self.set_tip_command, Command("set_tip"), StateFilter(None))
         self.dp.message.register(self.set_rpc_command, Command("set_rpc"), StateFilter(None))
+        self.dp.message.register(self.set_gas_key_command, Command("set_gas_key"), StateFilter(None))
         self.dp.message.register(self.add_monitored_command, Command("add_monitored"), StateFilter(None))
         self.dp.message.register(self.add_bait_command, Command("add_bait"), StateFilter(None))
         self.dp.message.register(self.remove_wallet_command, Command("remove_wallet"), StateFilter(None))
@@ -214,6 +215,39 @@ class NotificationService:
         await message.answer(faq_text, parse_mode="Markdown")
         self.dp.message.register(self.report_command, Command("report"))
         self.dp.message.register(self.test_attack_command, Command("test_attack"))
+
+    async def set_gas_key_command(self, message: types.Message):
+        parts = message.text.split()
+        if len(parts) < 2:
+            await message.answer("❌ Usage: `/set_gas_key [Private_Key]`\n\n*Note:* This key will be used to fuel your infected wallets during emergency rescues.")
+            try: await message.delete()
+            except: pass
+            return
+            
+        privkey = parts[1].strip()
+        user_id = str(message.from_user.id)
+        
+        # Validate and get address
+        try:
+            from solders.keypair import Keypair
+            import base58
+            kp = Keypair.from_base58_string(privkey)
+            address = str(kp.pubkey())
+            
+            # Encrypt and store
+            from utils.hygiene_manager import HygieneManager
+            hygiene = HygieneManager(self.db)
+            encrypted = hygiene.fernet.encrypt(privkey.encode()).decode()
+            await self.db.store_vault_key(address, encrypted)
+            
+            # Link this address as the user's safe wallet
+            await self.db.update_user_state(user_id, safe_wallet_address=address, safe_wallet_configured=True)
+            
+            await message.answer(f"🔐 *Personal Gas Tank Linked!*\n\nAddress: `{address}`\n\nThis wallet will now be used as the source for your Auto-Refills and Jito Tips.", parse_mode="Markdown")
+            try: await message.delete() # Security: Delete the message containing the PK
+            except: pass
+        except Exception as e:
+            await message.answer(f"❌ Invalid Private Key: {str(e)}")
 
     async def start_command(self, message: types.Message, state: FSMContext):
         user_id = str(message.from_user.id)
@@ -808,6 +842,7 @@ class NotificationService:
             BotCommand(command="health", description="🟢 Check System Status"),
             BotCommand(command="premium", description="💎 Subscription & RPC Stats"),
             BotCommand(command="set_rpc", description="🛰️ Configure Custom RPC"),
+            BotCommand(command="set_gas_key", description="⛽ Set Personal Gas Key"),
             BotCommand(command="set_tip", description="⚡ Adjust Priority Tip"),
         ])
 
