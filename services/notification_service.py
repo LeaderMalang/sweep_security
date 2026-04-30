@@ -131,8 +131,6 @@ class NotificationService:
         
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
         self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
-        self.dp.callback_query.register(self.handle_status_refresh, F.data == "status_refresh")
-        self.dp.callback_query.register(self.handle_settings_callback, F.data.startswith("settings_"))
 
     async def premium_command(self, message: types.Message):
         user_id = str(message.from_user.id)
