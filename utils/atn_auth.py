@@ -11,6 +11,7 @@ def get_atn_jwt():
     pem_path = "private.pem"
     
     if not os.path.exists(pem_path):
+        logging.warning(f"❌ ATN Auth: private.pem not found at {os.path.abspath(pem_path)}")
         return None
         
     try:

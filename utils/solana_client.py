@@ -11,11 +11,13 @@ class SolanaConnectionPool:
         
         # Get JWT for All That Node if private.pem exists
         token = get_atn_jwt()
-        headers = {"Authorization": f"Bearer {token}"} if token else None
-        
         if token:
-            logging.info("🔑 ATN Auth: JWT injected into RPC clients.")
-            
+            logging.info("🔑 ATN Auth: JWT generated successfully.")
+            headers = {"Authorization": f"Bearer {token}"}
+        else:
+            logging.warning("⚠️ ATN Auth: No JWT generated (check private.pem).")
+            headers = None
+        
         # Use extra_headers keyword for authorization
         self.clients = [AsyncClient(e, extra_headers=headers) for e in self.endpoints]
         self.current_index = 0
@@ -24,6 +26,8 @@ class SolanaConnectionPool:
         return self.clients[self.current_index]
 
     async def rotate_endpoint(self):
+        if len(self.clients) <= 1:
+            return
         self.current_index = (self.current_index + 1) % len(self.clients)
         logging.warning(f"Rotating to RPC endpoint: {self.endpoints[self.current_index]}")
 
@@ -36,15 +40,21 @@ class SolanaClient:
     def client(self):
         return self.pool.get_client()
 
-    async def get_balance(self, address: str):
+    async def get_balance(self, address: str, retries=3):
+        if retries < 0:
+            return 0.0
         pubkey = Pubkey.from_string(address)
         try:
             response = await self.client.get_balance(pubkey)
             return response.value / 1e9
         except Exception as e:
-            logging.error(f"RPC Error: {e}")
+            if retries <= 0:
+                logging.error(f"❌ RPC Final Failure: {e}")
+                return 0.0
+            
+            logging.error(f"RPC Error ({retries} retries left): {e}")
             await self.pool.rotate_endpoint()
-            return await self.get_balance(address)
+            return await self.get_balance(address, retries - 1)
 
     async def close(self):
         for client in self.pool.clients:
