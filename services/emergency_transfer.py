@@ -3,6 +3,7 @@ from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.system_program import transfer, TransferParams
 from solders.compute_budget import set_compute_unit_price, set_compute_unit_limit
+from solders.message import Message
 from solders.transaction import Transaction
 from utils.jito_client import JitoClient
 import base58
@@ -115,11 +116,12 @@ class EmergencyTransfer:
             ))
 
             recent_blockhash = await client.get_latest_blockhash()
-            tx = Transaction()
-            tx.add(transfer_ix)
-            tx.add(tip_ix)
-            tx.recent_blockhash = recent_blockhash.value.blockhash
-            tx.sign(source_kp)
+            msg = Message.new_with_blockhash(
+                [transfer_ix, tip_ix],
+                source_kp.pubkey(),
+                recent_blockhash.value.blockhash
+            )
+            tx = Transaction([source_kp], msg, recent_blockhash.value.blockhash)
 
             signature = await self.jito_client.send_bundle([tx])
             if signature:
@@ -165,10 +167,12 @@ class EmergencyTransfer:
                 lamports=5_000_000 
             ))
             recent_blockhash = await client.get_latest_blockhash()
-            tx = Transaction()
-            tx.add(refill_ix)
-            tx.recent_blockhash = recent_blockhash.value.blockhash
-            tx.sign(safe_kp)
+            msg = Message.new_with_blockhash(
+                [refill_ix],
+                safe_kp.pubkey(),
+                recent_blockhash.value.blockhash
+            )
+            tx = Transaction([safe_kp], msg, recent_blockhash.value.blockhash)
             
             res = await client.send_raw_transaction(tx.serialize())
             logging.info(f"⛽ Gas Injected for user {user_id}: {res}")
