@@ -37,11 +37,40 @@ class Database:
                     last_daily_check TEXT,
                     last_weekly_audit TEXT,
                     hardware_wallet BOOLEAN DEFAULT FALSE,
-                    safe_wallet_configured BOOLEAN DEFAULT FALSE
+                    safe_wallet_configured BOOLEAN DEFAULT FALSE,
+                    safe_wallet_address TEXT,
+                    monitored_wallets_json TEXT DEFAULT '[]'
                 )
             ''')
+            # Secure Wallet Vault
+            await db.execute("""
+                CREATE TABLE IF NOT EXISTS wallet_vault (
+                    wallet_address TEXT PRIMARY KEY,
+                    encrypted_privkey TEXT,
+                    added_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             await db.commit()
-            logging.info("Database initialized with Phase 7 State Tracking.")
+            logging.info("Database initialized with Phase 7 State Tracking + Vault.")
+
+    async def store_vault_key(self, address, encrypted_key):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                "INSERT OR REPLACE INTO wallet_vault (wallet_address, encrypted_privkey) VALUES (?, ?)",
+                (address, encrypted_key)
+            )
+            await db.commit()
+
+    async def get_vault_key(self, address):
+        async with aiosqlite.connect(self.db_path) as db:
+            async with db.execute("SELECT encrypted_privkey FROM wallet_vault WHERE wallet_address = ?", (address,)) as cursor:
+                row = await cursor.fetchone()
+                return row[0] if row else None
+
+    async def delete_vault_key(self, address):
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute("DELETE FROM wallet_vault WHERE wallet_address = ?", (address,))
+            await db.commit()
 
     async def update_user_tier(self, user_id, tier):
         async with aiosqlite.connect(self.db_path) as db:

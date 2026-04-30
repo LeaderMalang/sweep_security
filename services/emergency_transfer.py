@@ -8,6 +8,8 @@ from utils.jito_client import JitoClient
 import base58
 import config
 import logging
+import json
+import asyncio
 
 class EmergencyTransfer:
     def __init__(self, solana_client, jito_client=None):
@@ -15,11 +17,39 @@ class EmergencyTransfer:
         self.jito_client = jito_client or JitoClient()
         self.safe_wallet = Pubkey.from_string(config.SAFE_WALLET_ADDRESS) if config.SAFE_WALLET_ADDRESS else None
 
-    async def execute_all(self):
-        """Triggers a global sweep of all protected assets."""
-        logging.warning("🚨 GLOBAL PANIC: execute_all triggered.")
-        # In a real scenario, this would fetch encrypted keys from the DB
-        return False
+    async def execute_all(self, user_id: str, db):
+        """Triggers a global sweep of all protected assets for a user."""
+        logging.warning(f"🚨 GLOBAL PANIC: execute_all triggered for user {user_id}")
+        
+        from utils.encryption_utils import EncryptionManager
+        encryptor = EncryptionManager(config.ENCRYPTION_KEY)
+        
+        state = await db.get_user_state(user_id)
+        if not state or not state['monitored_wallets_json']:
+            logging.error("No monitored wallets found for sweep.")
+            return False
+
+        wallets = json.loads(state['monitored_wallets_json'])
+        tasks = []
+        
+        for address in wallets:
+            encrypted_key = await db.get_vault_key(address)
+            if encrypted_key:
+                try:
+                    privkey = encryptor.decrypt(encrypted_key)
+                    tasks.append(self.sweep_all_sol_jito(privkey))
+                except Exception as e:
+                    logging.error(f"Failed to decrypt key for {address}: {e}")
+        
+        if not tasks:
+            logging.error("No valid keys found in vault for any wallet.")
+            return False
+
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        success_count = sum(1 for r in results if r and not isinstance(r, Exception))
+        
+        logging.info(f"Global Panic Complete: {success_count}/{len(tasks)} wallets swept.")
+        return success_count > 0
 
     async def sweep_all(self, wallet_address, destination):
         """Sweeps a specific wallet to a destination."""
