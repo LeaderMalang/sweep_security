@@ -58,8 +58,8 @@ class SolanaClient:
                 await self.db.increment_rpc_usage(user_id)
                 return self.client
         
-        # 3. Free Tier Fallback (Public Node - Slow)
-        return AsyncClient("https://api.mainnet-beta.solana.com")
+        # 3. Free Tier Fallback (Use first configured RPC - respects .env)
+        return AsyncClient(config.SOLANA_RPC_URLS[0])
 
     async def get_balance(self, address: str, user_id: str = None, retries=3):
         if retries < 0:

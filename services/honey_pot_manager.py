@@ -75,9 +75,11 @@ class HoneyPotManager:
                     # 2. Smart Threshold Adjustment (Advanced Feature)
                     if user.get('smart_thresholds_enabled'):
                         # If enabled, lower threshold by 20% during 'simulated' high activity
-                        # In production, this would use a volatility index
                         threshold *= 0.8
-                        logging.info(f"🧠 SMART MODE: Threshold lowered to {threshold} for User {user_id}")
+                    
+                    # Ensure threshold is sane (min 0.001 SOL)
+                    threshold = max(threshold, 0.001)
+                    logging.info(f"🧠 SMART MODE: Active threshold {threshold} for User {user_id}")
 
                     retain = user['skimming_retain']
                     bait_wallets = json.loads(user.get('bait_wallets_json', '[]'))
@@ -88,7 +90,7 @@ class HoneyPotManager:
                         # Get balance using user's specific RPC
                         balance = await self.solana_client.get_balance(wallet, user_id=user_id)
                         
-                        if balance >= threshold:
+                        if balance >= threshold and balance > 0:
                             logging.warning(f"🍯 HARVEST DETECTED for User {user_id}: {wallet} balance ({balance}) hits threshold ({threshold})")
                             
                             encrypted_key = await self.db.get_vault_key(wallet)
