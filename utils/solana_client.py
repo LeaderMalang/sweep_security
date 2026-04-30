@@ -48,20 +48,21 @@ class SolanaClient:
     async def get_client_for_user(self, user_id: str):
         """Returns a custom AsyncClient if the user has one, otherwise the pool client."""
         if self.db:
-            state = await self.db.get_user_state(user_id)
-            if not state: return self.client
+            row = await self.db.get_user_state(user_id)
+            if not row: return self.client
+            state = dict(row)
 
-            # 1. Admin/Premium Bypass (High-Speed System RPC)
-            is_admin = user_id == str(config.TELEGRAM_CHAT_ID) # Or check username via DB
-            is_premium = state['subscription_tier'] == 'premium'
+            # 1. Check for Custom RPC first (By-pass usage tracking)
+            if state.get('custom_rpc_url'):
+                return AsyncClient(state['custom_rpc_url'], extra_headers={"Referer": "https://troydex.io"})
+
+            # 2. Using System RPC (Pro/Lite/Admin)
+            tier = state.get('subscription_tier', 'free').lower()
+            is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
             
-            if is_admin or is_premium:
+            if is_admin or tier in ['lite', 'pro', 'premium']:
                 await self.db.increment_rpc_usage(user_id)
                 return self.client
-
-            # 2. Regular user with custom RPC
-            if state['custom_rpc_url']:
-                return AsyncClient(state['custom_rpc_url'], extra_headers={"Referer": "https://troydex.io"})
         
         # 3. Free Tier Fallback (Public Node - Slow)
         return AsyncClient("https://api.mainnet-beta.solana.com")

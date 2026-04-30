@@ -122,6 +122,7 @@ class NotificationService:
         self.dp.message.register(self.faq_command, Command("faq"), StateFilter(None))
         self.dp.message.register(self.premium_command, Command("premium"), StateFilter(None))
         self.dp.message.register(self.set_tip_command, Command("set_tip"), StateFilter(None))
+        self.dp.message.register(self.set_rpc_command, Command("set_rpc"), StateFilter(None))
         self.dp.message.register(self.add_monitored_command, Command("add_monitored"), StateFilter(None))
         self.dp.message.register(self.add_bait_command, Command("add_bait"), StateFilter(None))
         self.dp.message.register(self.remove_wallet_command, Command("remove_wallet"), StateFilter(None))
@@ -697,6 +698,21 @@ class NotificationService:
         await message.answer(f"✅ *Honey Pot Network Updated!*\nAdded `{len(added)}` bait wallets. Skimming is now 100% active!")
         await state.clear()
 
+    async def set_rpc_command(self, message: types.Message):
+        parts = message.text.split()
+        if len(parts) < 2:
+            await message.answer("❌ Usage: `/set_rpc [RPC_URL]`")
+            return
+            
+        rpc_url = parts[1].strip()
+        if not rpc_url.startswith("http"):
+            await message.answer("❌ Invalid RPC URL. Must start with http:// or https://")
+            return
+
+        user_id = str(message.from_user.id)
+        await self.db.update_user_state(user_id, custom_rpc_url=rpc_url)
+        await message.answer(f"🚀 *Custom RPC Configured!*\n\nI will now use `{rpc_url[:30]}...` for your wallet operations.", parse_mode="Markdown")
+
     async def settings_command(self, message: types.Message):
         await self.show_settings_menu(user_id=str(message.from_user.id))
 
@@ -784,8 +800,9 @@ class NotificationService:
             BotCommand(command="skim", description="🍯 Configure Auto-Harvesting"),
             BotCommand(command="history", description="📜 View Threat History"),
             BotCommand(command="health", description="🟢 Check System Status"),
-            BotCommand(command="premium", description="💎 Upgrade to Premium Speed"),
-            BotCommand(command="faq", description="🛡️ Features & Security FAQ")
+            BotCommand(command="premium", description="💎 Subscription & RPC Stats"),
+            BotCommand(command="set_rpc", description="🛰️ Configure Custom RPC"),
+            BotCommand(command="set_tip", description="⚡ Adjust Priority Tip"),
         ])
 
         await self.dp.start_polling(self.bot)
