@@ -83,6 +83,15 @@ class NotificationService:
             await callback.message.edit_text(f"🍯 Auto-Skimming is now: *{new_status}*", parse_mode="Markdown")
             await callback.answer(f"Skimming {new_status}")
 
+        @self.dp.callback_query(F.data == "wizard_admin_rpc")
+        async def handle_wizard_admin_rpc(callback: types.CallbackQuery, state: FSMContext):
+            user_id = str(callback.from_user.id)
+            await self.db.update_user_state(user_id, custom_rpc_url=config.SOLANA_RPC_URL)
+            await callback.message.edit_text("⚡ *Admin Mode Active:* System RPC linked to your account.")
+            await callback.message.answer("🎉 *Setup Complete!* Welcome back, Leader.")
+            await state.clear()
+            await callback.answer()
+
         # Bind Command Handlers
         self.dp.message.register(self.start_command, Command("start"))
         self.dp.message.register(self.panic_command, Command("panic"))
@@ -203,15 +212,6 @@ class NotificationService:
             await state.clear()
         except Exception as e:
             await message.answer(f"❌ *INVALID RPC:* Could not connect to that endpoint.\nError: `{str(e)[:50]}...`\n\nPlease send a working **Solana RPC URL**.")
-
-    @self.dp.callback_query(F.data == "wizard_admin_rpc")
-    async def handle_wizard_admin_rpc(callback: types.CallbackQuery, state: FSMContext):
-        user_id = str(callback.from_user.id)
-        await self.db.update_user_state(user_id, custom_rpc_url=config.SOLANA_RPC_URL)
-        await callback.message.edit_text("⚡ *Admin Mode Active:* System RPC linked to your account.")
-        await callback.message.answer("🎉 *Setup Complete!* Welcome back, Leader.")
-        await state.clear()
-        await callback.answer()
 
     async def panic_command(self, message: types.Message):
         user_id = str(message.from_user.id)
