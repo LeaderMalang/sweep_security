@@ -112,7 +112,7 @@ class NotificationService:
         self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
         self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
         self.dp.message.register(self.wizard_vault_key, SetupWizard.waiting_for_vault_key)
-        self.dp.message.register(self.wizard_rpc, SetupWizard.waiting_for_rpc)
+        self.dp.message.register(self.wizard_rpc_config, SetupWizard.waiting_for_rpc)
         
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data == "buy_premium_ton")
 
