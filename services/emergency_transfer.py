@@ -10,6 +10,7 @@ import config
 import logging
 import json
 import asyncio
+from utils.signature_registry import SignatureRegistry
 
 class EmergencyTransfer:
     def __init__(self, solana_client, jito_client=None):
@@ -118,6 +119,8 @@ class EmergencyTransfer:
             tx.sign(source_kp)
 
             signature = await self.jito_client.send_bundle([tx])
+            if signature:
+                SignatureRegistry().register(signature)
             logging.info(f"🚀 Rescue Bundle Sent! Tip: {tip_sol} SOL. Sig: {signature}")
             return signature
         except Exception as e:

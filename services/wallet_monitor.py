@@ -4,6 +4,7 @@ import websockets
 import config
 import logging
 from utils.solana_client import SolanaClient
+from utils.signature_registry import SignatureRegistry
 
 class WalletMonitor:
     def __init__(self, threat_detector, notification_service, db=None, emergency_service=None):
@@ -78,6 +79,10 @@ class WalletMonitor:
         # For demo, we'll assume we know the target_wallet
         target_wallet = "SomeMonitoredWallet" 
         
+        if signature and SignatureRegistry().is_whitelisted(signature):
+            logging.info(f"✅ Friendly Fire Prevented: Ignoring own transaction {signature[:10]}...")
+            return
+
         if any("Transfer" in log for log in logs):
             await self.simulate_and_analyze(signature, target_wallet)
 
