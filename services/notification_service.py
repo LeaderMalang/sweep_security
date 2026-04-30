@@ -11,7 +11,6 @@ class SetupWizard(StatesGroup):
     waiting_for_safe_wallet = State()
     waiting_for_monitored_wallet = State()
     waiting_for_vault_key = State()
-    waiting_for_rpc = State()
     waiting_for_skim_retain = State()
     waiting_for_skim_threshold = State()
     waiting_for_skim_addresses = State()
@@ -133,7 +132,6 @@ class NotificationService:
         self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
         self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
         self.dp.message.register(self.wizard_vault_key, SetupWizard.waiting_for_vault_key)
-        self.dp.message.register(self.wizard_rpc_config, SetupWizard.waiting_for_rpc)
         
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
         self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
