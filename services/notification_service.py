@@ -466,7 +466,11 @@ class NotificationService:
         if len(baits) > 3: status_text += "• ... (Use /wallets for full list)\n"
         status_text += "━━━━━━━━━━━━━━━━━━━━"
 
-        await message.answer(status_text, parse_mode="Markdown")
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="📊 Refresh Status", callback_data="status_refresh"))
+        builder.row(types.InlineKeyboardButton(text="⚙️ Open Settings", callback_data="settings_menu"))
+        
+        await message.answer(status_text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
     async def wallets_command(self, message: types.Message, user_id_override: str = None):
         user_id = user_id_override or str(message.from_user.id)
@@ -501,7 +505,9 @@ class NotificationService:
         if not baits: report += "_No bait configured._\n"
         
         report += "━━━━━━━━━━━━━━━━━━━━"
-        await message.answer(report, parse_mode="Markdown")
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="🏠 Back to Dashboard", callback_data="status_refresh"))
+        await message.answer(report, parse_mode="Markdown", reply_markup=builder.as_markup())
 
     async def remove_wallet_command(self, message: types.Message):
         parts = message.text.split()
