@@ -60,14 +60,25 @@ async def main():
     
     # 5. Initialize Response Engine
     emergency_service = EmergencyTransfer(solana_client, jito_client=jito_client)
+    notification_service.emergency_service = emergency_service
     wallet_monitor = WalletMonitor(threat_detector, notification_service, db, emergency_service)
     evm_monitor = EVMMonitor(threat_detector, notification_service)
     honey_pot_manager = HoneyPotManager(db=db, threat_detector=threat_detector)
 
-    # 6. Start Global Orchestration
+    # 6. Start API Bridge (Phase 34)
+    from api.server import app, state as api_state
+    import uvicorn
+    api_state.db = db
+    api_state.emergency_service = emergency_service
+    
+    api_config = uvicorn.Config(app, host="0.0.0.0", port=8000, log_level="info")
+    api_server = uvicorn.Server(api_config)
+
+    # 7. Start Global Orchestration
     try:
         logging.info("🛡️ GUARDIAN NEXUS ULTRA-FRONTIER ONLINE 🛡️")
         await asyncio.gather(
+            api_server.serve(),
             wallet_monitor.monitor(),
             evm_monitor.monitor(),
             honey_pot_manager.start_monitoring(),

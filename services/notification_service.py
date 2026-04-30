@@ -27,13 +27,31 @@ class NotificationService:
             await callback.message.edit_text("✅ Alert Dismissed.")
             await callback.answer()
 
+        @self.dp.message(Command("start"))
+        async def start_command(message: types.Message):
+            welcome_text = (
+                "🛡️ *Guardian Nexus Online*\n\n"
+                "I am your automated security sentinel. I am currently monitoring your wallets for sub-millisecond threats.\n\n"
+                "📜 *Available Commands:*\n"
+                "/panic - Trigger Emergency Sweep\n"
+                "/settings - Configure Defense Modes\n"
+                "/report - File a Cyber Report"
+            )
+            await message.answer(welcome_text, parse_mode="Markdown")
+
+        @self.dp.message(Command("panic"))
+        async def panic_command(message: types.Message):
+            await message.answer("⚠️ *GLOBAL PANIC INITIATED* ⚠️\nExecuting emergency sweep logic...")
+            if self.emergency_service:
+                await self.emergency_service.execute_all() # Logic from Phase 5
+            await message.answer("✅ Recovery sweep logic completed.")
+
         @self.dp.message(Command("settings"))
         async def settings_command(message: types.Message):
             await self.show_settings_menu()
 
         @self.dp.message(Command("report"))
         async def report_command(message: types.Message):
-            # This would be linked to the ReportCenter service
             await message.answer("📢 Use the Dashboard or /report_center to see official links.")
 
     async def send_threat_alert(self, wallet_address: str, score: int, reasons: list, tx_hash: str):

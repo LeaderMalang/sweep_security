@@ -8,5 +8,7 @@ python-dotenv
 httpx
 websockets
 base58
+fastapi
+uvicorn
 recharts-ready
 framer-motion-ready

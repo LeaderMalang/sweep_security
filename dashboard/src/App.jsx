@@ -57,6 +57,53 @@ const StatCard = ({ icon: Icon, label, value, color }) => (
 const App = () => {
   const [activeTab, setActiveTab] = useState('overview');
   const [vaultLocked, setVaultLocked] = useState(true);
+  const [stats, setStats] = useState({
+    assets_protected: 0,
+    incidents_blocked: 0,
+    vault_status: "LOCKED",
+    node_status: "ONLINE"
+  });
+  const [wallets, setWallets] = useState([]);
+
+  const API_BASE = "http://62.171.139.83:8000";
+
+  useEffect(() => {
+    const fetchStats = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/stats`);
+        const data = await res.json();
+        setStats(data);
+      } catch (e) {
+        console.error("API Error:", e);
+      }
+    };
+
+    const fetchWallets = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/wallets`);
+        const data = await res.json();
+        setWallets(data);
+      } catch (e) {
+        console.error("API Error:", e);
+      }
+    };
+
+    fetchStats();
+    fetchWallets();
+    const interval = setInterval(fetchStats, 5000); // Poll every 5s
+    return () => clearInterval(interval);
+  }, []);
+
+  const triggerPanic = async () => {
+    if (window.confirm("⚠️ ARE YOU SURE? This will sweep all funds to your safe wallet!")) {
+      try {
+        await fetch(`${API_BASE}/api/panic`, { method: "POST" });
+        alert("🚨 EMERGENCY SWEEP TRIGGERED!");
+      } catch (e) {
+        alert("Failed to trigger panic. Check backend connection.");
+      }
+    }
+  };
 
   const officialChannels = [
     { name: "Chainabuse", url: "https://www.chainabuse.com/", desc: "Report malicious addresses to global database." },
@@ -138,7 +185,10 @@ const App = () => {
               <Cpu size={16} />
               <span>Simulation: ON</span>
             </div>
-            <button className="bg-red-600 hover:bg-red-500 px-6 py-2 rounded-lg font-bold transition-all flex items-center gap-2 shadow-lg shadow-red-600/20">
+            <button 
+              onClick={triggerPanic}
+              className="bg-red-600 hover:bg-red-500 px-6 py-2 rounded-lg font-bold transition-all flex items-center gap-2 shadow-lg shadow-red-600/20"
+            >
               <Zap size={18} />
               <span>GLOBAL PANIC</span>
             </button>
@@ -148,8 +198,8 @@ const App = () => {
         {activeTab === 'overview' && (
           <>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
-              <StatCard icon={Shield} label="Assets Protected" value="$248,500" color="blue" />
-              <StatCard icon={AlertTriangle} label="Incidents Blocked" value="1,492" color="orange" />
+              <StatCard icon={Shield} label="Assets Protected" value={`$${stats.assets_protected.toLocaleString()}`} color="blue" />
+              <StatCard icon={AlertTriangle} label="Incidents Blocked" value={stats.incidents_blocked.toLocaleString()} color="orange" />
               <StatCard icon={Key} label="Pre-signed Txs" value="Ready" color="green" />
               <StatCard icon={Bell} label="Network Intel" value="Synced" color="purple" />
             </div>
