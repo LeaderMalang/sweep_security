@@ -214,9 +214,9 @@ class NotificationService:
             "Status: *ACTIVE & PROTECTING*\n"
             f"Tier: *{db_state['subscription_tier'].upper()}*\n\n"
             "📂 *COMMANDS*\n"
-            "• /add_monitored - Watch a new wallet\n"
-            "• /premium - Upgrade Tier & Speed\n"
-            "• /panic - Global Rescue Sweep\n"
+            "• `/add_monitored` - Watch a new wallet\n"
+            "• `/premium` - Upgrade Tier & Speed\n"
+            "• `/panic` - Global Rescue Sweep\n"
             "━━━━━━━━━━━━━━━━━━━━"
         )
         builder = InlineKeyboardBuilder()
@@ -239,8 +239,8 @@ class NotificationService:
             await message.answer(
                 "⚠️ *FREE TIER LIMIT REACHED*\n\n"
                 "Free users can only monitor **1 wallet**.\n\n"
-                "💎 *Upgrade to Lite ($2)* for unlimited monitoring with your own RPC.\n"
-                "🚀 *Upgrade to Pro ($10)* for unlimited monitoring + High-Speed System RPC.",
+                "💎 Upgrade to **LITE ($2)** for unlimited monitoring.\n"
+                "🚀 Upgrade to **PRO ($10)** for High-Speed RPC.",
                 parse_mode="Markdown"
             )
             return
@@ -389,7 +389,7 @@ class NotificationService:
             f"🏦 Safe Wallet: `{safe_wallet[:6]}...{safe_wallet[-4:]}`\n"
             f"🤖 Auto-Defense: *{auto_def}*\n"
             f"📡 RPC Requests: *{state.get('rpc_usage_count', 0)}*\n"
-            f"👀 Monitoring: *{len(wallets)}* Wallets\n"
+            f"👀 Monitoring: `{len(wallets)}` Wallets\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
         )
         for addr in wallets:
