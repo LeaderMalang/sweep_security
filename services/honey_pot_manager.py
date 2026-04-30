@@ -23,7 +23,7 @@ class HoneyPotManager:
             "Authorization": f"Bearer {token}" if token else "",
             "Referer": "https://troydex.io"
         }
-        
+        # Using a more robust way to pass headers for websockets v13.0+
         async with websockets.connect(config.SOLANA_WSS_URL, extra_headers=headers) as websocket:
             for wallet in self.honey_pots:
                 subscribe_msg = {
