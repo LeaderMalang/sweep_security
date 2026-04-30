@@ -38,6 +38,14 @@ class NotificationService:
         builder.row(types.InlineKeyboardButton(text="⚙️ Open Settings", callback_data="settings_menu"))
         return builder.as_markup()
 
+    def get_yes_no_keyboard(self, prefix):
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            types.InlineKeyboardButton(text="✅ YES", callback_data=f"{prefix}_yes"),
+            types.InlineKeyboardButton(text="❌ NO", callback_data=f"{prefix}_no")
+        )
+        return builder.as_markup()
+
     def _register_handlers(self):
         @self.dp.callback_query(F.data.startswith("sweep_"))
         async def handle_manual_sweep_callback(callback: types.CallbackQuery):
