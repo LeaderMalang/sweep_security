@@ -69,14 +69,7 @@ class NotificationService:
             await self.panic_command(callback.message)
             await callback.answer()
 
-        # Register State Handlers
-        self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
-        self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
-        self.dp.message.register(self.wizard_vault_key, SetupWizard.waiting_for_vault_key)
-        self.dp.message.register(self.wizard_rpc_config, SetupWizard.waiting_for_rpc)
-        self.dp.message.register(self.wizard_skim_retain, SetupWizard.waiting_for_skim_retain)
-        self.dp.message.register(self.wizard_skim_threshold, SetupWizard.waiting_for_skim_threshold)
-        self.dp.message.register(self.wizard_skim_addresses, SetupWizard.waiting_for_skim_addresses)
+        # (State Handlers registered below in consolidated block)
 
         @self.dp.callback_query(F.data == "toggle_refill")
         async def handle_toggle_refill(callback: types.CallbackQuery):
@@ -132,6 +125,9 @@ class NotificationService:
         self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
         self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
         self.dp.message.register(self.wizard_vault_key, SetupWizard.waiting_for_vault_key)
+        self.dp.message.register(self.wizard_skim_retain, SetupWizard.waiting_for_skim_retain)
+        self.dp.message.register(self.wizard_skim_threshold, SetupWizard.waiting_for_skim_threshold)
+        self.dp.message.register(self.wizard_skim_addresses, SetupWizard.waiting_for_skim_addresses)
         
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
         self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
