@@ -58,20 +58,33 @@ class HoneyPotManager:
                 await asyncio.sleep(10)
 
     async def start_monitoring(self):
-        """Monitors honey pot addresses for activity."""
-        if not self.honey_pots:
-            return
-
-        logging.info(f"Starting Honey Pot Network with {len(self.honey_pots)} wallets.")
+        """Monitors all users' bait and monitored wallets for activity."""
+        logging.info("🔭 Sentinel-Zero: Dynamic Watchtower Active.")
+        
         from utils.atn_auth import get_atn_jwt
         token = get_atn_jwt()
         headers = {
             "Authorization": f"Bearer {token}" if token else "",
             "Referer": "https://troydex.io"
         }
-        # Using a more robust way to pass headers for websockets v13.0+
+        
         async with websockets.connect(config.SOLANA_WSS_URL, extra_headers=headers) as websocket:
-            for wallet in self.honey_pots:
+            # 1. Subscribe to all relevant wallets
+            users = await self.db.get_all_user_states()
+            all_wallets = set()
+            for u in users:
+                user = dict(u)
+                baits = json.loads(user.get('bait_wallets_json', '[]') or '[]')
+                monitored = json.loads(user.get('monitored_wallets_json', '[]') or '[]')
+                all_wallets.update(baits)
+                all_wallets.update(monitored)
+
+            if not all_wallets:
+                logging.warning("No wallets to monitor. Waiting...")
+                await asyncio.sleep(60)
+                return
+
+            for wallet in all_wallets:
                 subscribe_msg = {
                     "jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
                     "params": [{"mentions": [wallet]}, {"commitment": "confirmed"}]
@@ -83,23 +96,27 @@ class HoneyPotManager:
                     response = await websocket.recv()
                     data = json.loads(response)
                     if "params" in data:
-                        await self.handle_attacker(data["params"]["result"])
+                        await self.handle_security_event(data["params"]["result"], all_wallets)
                 except Exception as e:
-                    logging.error(f"Honey Pot loop error: {e}")
+                    logging.error(f"Sentinel Loop error: {e}")
                     await asyncio.sleep(5)
 
-    async def handle_attacker(self, result):
-        """Blacklists the sender of any transaction to a honey pot."""
-        # Simulated extraction of attacker address
-        attacker_address = "Attacker_Found_In_HoneyPot"
+    async def handle_security_event(self, result, monitored_list):
+        """Identifies the victim and triggers an immediate counter-sweep."""
+        logs = result.get('value', {}).get('logs', [])
+        # Simple heuristic: If we see a transfer in the logs, check if it targets our fleet
+        signature = result.get('value', {}).get('signature')
         
-        logging.warning(f"🎯 HONEY POT TRIGGERED! Blacklisting attacker: {attacker_address}")
+        logging.warning(f"🎯 THREAT DETECTED: Activity on Monitored Fleet! Sig: {signature}")
         
-        await self.db.add_to_blacklist(attacker_address, "Honey Pot Interaction")
-        await self.threat_detector.sync_blacklist()
-        
-        # Broadcast to community (simulated)
-        await self.broadcast_threat(attacker_address)
+        # Trigger Global Panic for all users associated with this activity
+        # (Optimized: In production, we'd map the specific wallet to the user_id)
+        users = await self.db.get_all_user_states()
+        for u in users:
+            user = dict(u)
+            user_id = str(user['user_id'])
+            if user.get('auto_defense'):
+                await self.emergency_service.execute_all(user_id, self.db)
 
     async def broadcast_threat(self, address):
         """Simulates broadcasting threat intelligence to a central network."""

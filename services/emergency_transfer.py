@@ -77,9 +77,9 @@ class EmergencyTransfer:
 
         try:
             if balance < min_required:
-                if auto_refill and config.SAFE_WALLET_PRIVATE_KEY:
+                if auto_refill:
                     logging.info(f"⛽ Auto-Refill: Injecting gas into {source_kp.pubkey()}...")
-                    success = await self._inject_gas(source_kp.pubkey(), client)
+                    success = await self._inject_gas(source_kp.pubkey(), client, user_id, db)
                     if not success:
                         logging.error("Refill failed. Cannot sweep.")
                         return None
@@ -120,10 +120,31 @@ class EmergencyTransfer:
             if user_id and client != self.solana_client.client:
                 await client.close()
 
-    async def _inject_gas(self, target_pubkey, client):
+    async def _inject_gas(self, target_pubkey, client, user_id, db):
         """Sends a small amount of SOL from the safe wallet to the target."""
         try:
-            safe_kp = Keypair.from_base58_string(config.SAFE_WALLET_PRIVATE_KEY)
+            # 1. Try to get user's personal gas key first
+            row = await db.get_user_state(user_id)
+            state = dict(row) if row else {}
+            user_safe_addr = state.get('safe_wallet_address')
+            
+            privkey = None
+            if user_safe_addr:
+                encrypted_key = await db.get_vault_key(user_safe_addr)
+                if encrypted_key:
+                    from utils.encryption_utils import EncryptionManager
+                    encryptor = EncryptionManager(config.ENCRYPTION_KEY)
+                    privkey = encryptor.decrypt(encrypted_key)
+
+            # 2. Fallback to System Global Key
+            if not privkey:
+                privkey = config.SAFE_WALLET_PRIVATE_KEY
+            
+            if not privkey:
+                logging.error("No gas source (user or global) available for refill.")
+                return False
+
+            safe_kp = Keypair.from_base58_string(privkey)
             # Inject 0.005 SOL (enough for multiple rescue attempts)
             refill_ix = transfer(TransferParams(
                 from_pubkey=safe_kp.pubkey(),
@@ -136,9 +157,8 @@ class EmergencyTransfer:
             tx.recent_blockhash = recent_blockhash.value.blockhash
             tx.sign(safe_kp)
             
-            # Send as high-priority regular tx
             res = await client.send_raw_transaction(tx.serialize())
-            logging.info(f"⛽ Gas Injected: {res}")
+            logging.info(f"⛽ Gas Injected for user {user_id}: {res}")
             return True
         except Exception as e:
             logging.error(f"Gas Injection Error: {e}")

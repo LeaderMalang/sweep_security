@@ -120,6 +120,7 @@ class NotificationService:
         self.dp.message.register(self.skim_command, Command("skim"), StateFilter(None))
         self.dp.message.register(self.settings_command, Command("settings"), StateFilter(None))
         self.dp.message.register(self.faq_command, Command("faq"), StateFilter(None))
+        self.dp.message.register(self.recommend_command, Command("recommend"), StateFilter(None))
         self.dp.message.register(self.premium_command, Command("premium"), StateFilter(None))
         self.dp.message.register(self.set_tip_command, Command("set_tip"), StateFilter(None))
         self.dp.message.register(self.set_rpc_command, Command("set_rpc"), StateFilter(None))
@@ -134,7 +135,10 @@ class NotificationService:
         self.dp.message.register(self.wizard_vault_key, SetupWizard.waiting_for_vault_key)
         self.dp.message.register(self.wizard_rpc_config, SetupWizard.waiting_for_rpc)
         
-        self.dp.callback_query.register(self.handle_buy_premium_ton, F.data == "buy_premium_ton")
+        self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
+        self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
+        self.dp.callback_query.register(self.handle_status_refresh, F.data == "status_refresh")
+        self.dp.callback_query.register(self.handle_settings_callback, F.data.startswith("settings_"))
 
     async def premium_command(self, message: types.Message):
         user_id = str(message.from_user.id)
@@ -193,6 +197,40 @@ class NotificationService:
             "*Note:* Verification is automatic. Your tier will update once the transaction is confirmed on the TON blockchain.",
             parse_mode="Markdown"
         )
+        await callback.answer()
+
+    async def recommend_command(self, message: types.Message):
+        recommend_text = (
+            "🏆 *SENTINEL-ZERO: GOLDEN SETTINGS*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "To ensure a **100% Success Rate** against high-speed drainers, we recommend the following tactical configuration:\n\n"
+            "⚡ *1. Jito Priority Tip*\n"
+            "• Recommended: `0.005 SOL` or higher.\n"
+            "• Why: Attackers often tip 0.001-0.003. Setting 0.005 ensures you are at the front of the validator bundle.\n\n"
+            "⛽ *2. Safe Wallet (Gas Tank)*\n"
+            "• Recommended: `0.05 SOL` minimum balance.\n"
+            "• Why: This fuels up to 10 emergency refills without you having to manually intervene.\n\n"
+            "🍯 *3. Skimming Threshold*\n"
+            "• Recommended: `0.02 SOL` (Threshold) / `0.01 SOL` (Retain).\n"
+            "• Why: Leaves enough 'bait' to keep attackers interested while harvesting profit every time they send gas.\n\n"
+            "🛰️ *4. Custom RPC*\n"
+            "• Recommended: Use a private Helius or QuickNode endpoint.\n"
+            "• Why: Public RPCs have rate limits. Private nodes ensure your transaction is detected and sent in <200ms.\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Tip:* Use `/set_tip 0.005` to apply the recommended priority fee now."
+        )
+        await message.answer(recommend_text, parse_mode="Markdown")
+
+    async def handle_toggle_auto_wizard(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        action = callback.data.split("_")[-1]
+        
+        if action == "yes":
+            await self.db.update_user_state(user_id, auto_defense=True)
+            await callback.message.edit_text("🚀 *AUTO-DEFENSE ARMED!*\n\nYour perimeter is now secure. I am watching every transaction in sub-milliseconds.", parse_mode="Markdown")
+        else:
+            await callback.message.edit_text("⚠️ *DEFENSE REMAINING IDLE*\n\nYour configuration is saved, but automatic rescues are **OFF**. You can enable them anytime via /settings.", parse_mode="Markdown")
+        
         await callback.answer()
 
     async def faq_command(self, message: types.Message):
@@ -329,91 +367,43 @@ class NotificationService:
 
         from solders.pubkey import Pubkey
         added = []
-        errors = []
-
         for address in raw_input:
-            address = address.strip()
+            if not is_admin and tier == 'free' and len(wallets) >= 1:
+                break
             try:
                 Pubkey.from_string(address)
-                if not is_admin and tier == 'free' and len(wallets) >= 1:
-                    errors.append(f"❌ `{address[:6]}...`: Tier limit reached.")
-                    break
                 if address not in wallets:
                     wallets.append(address)
                     added.append(address)
-                else:
-                    errors.append(f"⚠️ `{address[:6]}...`: Already monitored.")
-            except ValueError:
-                errors.append(f"❌ `{address[:6]}...`: Invalid address.")
+            except: pass
 
         await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(wallets))
-        
-        report = "🛡️ *Bulk Monitoring Update*\n"
-        if added: report += f"✅ Added: {len(added)} wallets\n"
-        if errors: report += "\n".join(errors[:5]) # Show first 5 errors
-
-        await message.answer(report, parse_mode="Markdown")
-        
-        if added:
-            await state.update_data(last_wallet=added[-1]) # Use last one for key setup
-            await message.answer(f"🔒 *STEP 3:* Please send the **Private Key** for `{added[-1][:6]}...` to enable rescue logic.\n(You can add keys for others via /vault [Address])", parse_mode="Markdown")
-            await state.set_state(SetupWizard.waiting_for_vault_key)
-        else:
-            await state.clear()
+        await message.answer(f"✅ Added `{len(added)}` wallets to your fleet.\n\n🔐 *STEP 3:* Please send the **Private Key(s)** for these wallets.\n(You can send multiple keys separated by spaces or commas. I will match them automatically).")
+        await state.set_state(SetupWizard.waiting_for_vault_key)
 
     async def wizard_vault_key(self, message: types.Message, state: FSMContext):
-        privkey = message.text.strip()
-        data = await state.get_data()
-        address = data.get('last_wallet')
-        
-        try:
-            await message.delete()
-        except Exception: pass
-
-        # Strict Private Key Validation
-        from solders.keypair import Keypair
-        try:
-            kp = Keypair.from_base58_string(privkey)
-            if str(kp.pubkey()) != address:
-                await message.answer(f"❌ *KEY MISMATCH*\n\nThe private key provided does not belong to `{address[:6]}...{address[-4:]}`.\n\nPlease send the correct key.", parse_mode="Markdown")
-                return
-        except Exception:
-            await message.answer("❌ *INVALID PRIVATE KEY*\n\nPlease send a valid **Base58 Solana Private Key**.", parse_mode="Markdown")
-            return
-
-        from utils.encryption_utils import EncryptionManager
-        encryptor = EncryptionManager(config.ENCRYPTION_KEY)
-        encrypted = encryptor.encrypt(privkey)
-        await self.db.store_vault_key(address, encrypted)
-        
-        await message.answer(f"🔒 *Key Secured & Validated!*\n\n📡 *FINAL STEP:* Please send your **Solana RPC URL** (All That Node, Helius, etc).")
-        
-        # Admin Bypass
-        if message.from_user.username == "Leadermalang0":
-            builder = InlineKeyboardBuilder()
-            builder.row(types.InlineKeyboardButton(text="⚡ Use Admin Default RPC", callback_data="wizard_admin_rpc"))
-            await message.answer("🛡️ *Admin Detected:* You can use the high-speed system RPC instead of providing your own.", reply_markup=builder.as_markup())
-        
-        await state.set_state(SetupWizard.waiting_for_rpc)
-
-    async def wizard_rpc_config(self, message: types.Message, state: FSMContext):
-        rpc_url = message.text.strip()
+        raw_keys = message.text.replace(",", " ").split()
         user_id = str(message.from_user.id)
         
-        await message.answer("📡 *Validating RPC Endpoint...*")
+        from solders.keypair import Keypair
+        from utils.encryption_utils import EncryptionManager
+        encryptor = EncryptionManager(config.ENCRYPTION_KEY)
         
-        # Ping RPC
-        from solana.rpc.async_api import AsyncClient
-        try:
-            temp_client = AsyncClient(rpc_url)
-            await temp_client.get_health()
-            await temp_client.close()
-            
-            await self.db.update_user_state(user_id, custom_rpc_url=rpc_url)
-            await message.answer("✅ *RPC Validated!* Your Guardian is now fully armed.\nUse /status to see your profile.")
-            await state.clear()
-        except Exception as e:
-            await message.answer(f"❌ *INVALID RPC:* Could not connect to that endpoint.\nError: `{str(e)[:50]}...`\n\nPlease send a working **Solana RPC URL**.")
+        count = 0
+        for priv in raw_keys:
+            try:
+                kp = Keypair.from_base58_string(priv)
+                addr = str(kp.pubkey())
+                encrypted = encryptor.encrypt(priv)
+                await self.db.store_vault_key(addr, encrypted)
+                count += 1
+            except: pass
+
+        await message.answer(f"🔐 Linked `{count}` private keys to your vault.\n\n🛡️ *FINAL STEP:* Do you want to **ARM Auto-Defense** now?\n(This enables sub-millisecond rescue for all your wallets).", 
+                             reply_markup=self.get_yes_no_keyboard("toggle_auto_wizard"))
+        try: await message.delete()
+        except: pass
+        await state.clear()
 
     async def panic_command(self, message: types.Message):
         user_id = str(message.from_user.id)
