@@ -10,5 +10,4 @@ websockets
 base58
 fastapi
 uvicorn
-recharts-ready
-framer-motion-ready
+
