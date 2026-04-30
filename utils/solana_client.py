@@ -2,9 +2,7 @@ import asyncio
 import logging
 import config
 from solana.rpc.async_api import AsyncClient
-from solana.rpc.providers.async_http import AsyncHTTPProvider
 from solders.pubkey import Pubkey
-
 from utils.atn_auth import get_atn_jwt
 
 class SolanaConnectionPool:
@@ -18,10 +16,8 @@ class SolanaConnectionPool:
         if token:
             logging.info("🔑 ATN Auth: JWT injected into RPC clients.")
             
-        self.clients = [
-            AsyncClient(AsyncHTTPProvider(e, extra_headers=headers)) 
-            for e in self.endpoints
-        ]
+        # Use extra_headers keyword for authorization
+        self.clients = [AsyncClient(e, extra_headers=headers) for e in self.endpoints]
         self.current_index = 0
 
     def get_client(self) -> AsyncClient:
