@@ -160,6 +160,12 @@ class EmergencyTransfer:
                 return False
 
             safe_kp = Keypair.from_base58_string(privkey)
+            # 2.5 Balance Check for Gas Source
+            safe_bal = await client.get_balance(safe_kp.pubkey())
+            if safe_bal.value < 6_000_000: # 0.005 + fee
+                logging.error(f"❌ GAS TANK EMPTY: {safe_kp.pubkey()} only has {safe_bal.value/1e9} SOL. Please fund it for Auto-Refill.")
+                return False
+
             # Inject 0.005 SOL (enough for multiple rescue attempts)
             refill_ix = transfer(TransferParams(
                 from_pubkey=safe_kp.pubkey(),
