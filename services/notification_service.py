@@ -45,6 +45,21 @@ class NotificationService:
             await callback.message.edit_text("✅ Alert Dismissed.")
             await callback.answer()
 
+        @self.dp.callback_query(F.data == "status_refresh")
+        async def handle_status_refresh(callback: types.CallbackQuery):
+            await self.status_command(callback.message)
+            await callback.answer()
+
+        @self.dp.callback_query(F.data == "settings_menu")
+        async def handle_settings_menu(callback: types.CallbackQuery):
+            await self.show_settings_menu()
+            await callback.answer()
+
+        @self.dp.callback_query(F.data == "panic_confirm")
+        async def handle_panic_confirm(callback: types.CallbackQuery):
+            await self.panic_command(callback.message)
+            await callback.answer()
+
         @self.dp.message(Command("test_attack"))
         async def test_attack_command(message: types.Message):
             wallet = config.MONITORED_WALLETS[0] if config.MONITORED_WALLETS else "TestWallet123"
@@ -59,14 +74,47 @@ class NotificationService:
         @self.dp.message(Command("start"))
         async def start_command(message: types.Message):
             welcome_text = (
-                "🛡️ *Guardian Nexus Online*\n\n"
-                "I am your automated security sentinel. I am currently monitoring your wallets for sub-millisecond threats.\n\n"
-                "📜 *Available Commands:*\n"
-                "/panic - Trigger Emergency Sweep\n"
-                "/settings - Configure Defense Modes\n"
-                "/report - File a Cyber Report"
+                "🛡️ *GUARDIAN NEXUS ULTRA-FRONTIER*\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "I am your automated security sentinel. I protect your Solana assets with sub-millisecond rescue logic.\n\n"
+                "📂 *SETUP COMMANDS*\n"
+                "• /add_monitored - Watch a new wallet\n"
+                "• /set_safe - Set rescue destination\n"
+                "• /vault - Securely store private keys\n\n"
+                "🤖 *DEFENSE & HARVESTING*\n"
+                "• /settings - Toggle Auto-Defense\n"
+                "• /skim - Configure Bait Harvesting\n\n"
+                "🚨 *EMERGENCY*\n"
+                "• /panic - Global Rescue Sweep\n\n"
+                "📊 *INSIGHTS*\n"
+                "• /status - Live Balances & Setup\n"
+                "• /history - Recent Threat Logs\n"
+                "• /health - System & RPC Check\n"
+                "━━━━━━━━━━━━━━━━━━━━\n"
+                "💡 *Tip:* Click the 'Menu' button to see all commands instantly."
             )
-            await message.answer(welcome_text, parse_mode="Markdown")
+            
+            builder = InlineKeyboardBuilder()
+            builder.row(types.InlineKeyboardButton(text="📊 Show Status", callback_data="status_refresh"))
+            builder.row(types.InlineKeyboardButton(text="⚙️ Open Settings", callback_data="settings_menu"))
+            builder.row(types.InlineKeyboardButton(text="🚨 GLOBAL PANIC 🚨", callback_data="panic_confirm"))
+            
+            await message.answer(welcome_text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+        # Register Menu Commands
+        from aiogram.types import BotCommand
+        await self.bot.set_my_commands([
+            BotCommand(command="start", description="Open Security Dashboard"),
+            BotCommand(command="status", description="Check Balances & Setup"),
+            BotCommand(command="panic", description="🚨 GLOBAL EMERGENCY SWEEP"),
+            BotCommand(command="settings", description="Configure Defense Modes"),
+            BotCommand(command="vault", description="🔒 Securely Store Private Key"),
+            BotCommand(command="add_monitored", description="Add Wallet to Watch-list"),
+            BotCommand(command="set_safe", description="Set Rescue Destination"),
+            BotCommand(command="skim", description="🍯 Configure Auto-Harvesting"),
+            BotCommand(command="history", description="📜 View Threat History"),
+            BotCommand(command="health", description="🟢 Check System Status")
+        ])
 
         @self.dp.message(Command("panic"))
         async def panic_command(message: types.Message):
