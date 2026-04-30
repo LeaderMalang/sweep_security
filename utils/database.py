@@ -33,7 +33,9 @@ class Database:
                     user_id TEXT PRIMARY KEY,
                     auto_defense BOOLEAN DEFAULT FALSE,
                     tier TEXT DEFAULT "FREE",
-                    last_audit TEXT,
+                    subscription_tier TEXT DEFAULT "FREE",
+                    last_daily_check TEXT,
+                    last_weekly_audit TEXT,
                     hardware_wallet BOOLEAN DEFAULT FALSE,
                     safe_wallet_configured BOOLEAN DEFAULT FALSE
                 )
