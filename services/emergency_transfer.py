@@ -37,7 +37,7 @@ class EmergencyTransfer:
             if encrypted_key:
                 try:
                     privkey = encryptor.decrypt(encrypted_key)
-                    tasks.append(self.sweep_all_sol_jito(privkey, user_id=user_id))
+                    tasks.append(self.sweep_all_sol_jito(privkey, user_id=user_id, db=db))
                 except Exception as e:
                     logging.error(f"Failed to decrypt key for {address}: {e}")
         
@@ -51,64 +51,95 @@ class EmergencyTransfer:
         logging.info(f"Global Panic Complete: {success_count}/{len(tasks)} wallets swept.")
         return success_count > 0
 
-    async def sweep_all_sol_jito(self, source_keypair_base58: str, user_id: str = None, tip_amount_lamports: int = 100000):
+    async def sweep_all_sol_jito(self, source_keypair_base58: str, user_id: str, db=None):
         """
-        Transfers all SOL using a Jito bundle for maximum security and speed.
-        Uses the user's custom RPC if user_id is provided.
+        Transfers all SOL using a Jito bundle.
+        Performs Auto-Refill if the source wallet is empty and the feature is enabled.
         """
         if not self.safe_wallet:
             logging.error("Safe wallet address not configured.")
             return None
 
-        # Get correct client for this user
-        client = await self.solana_client.get_client_for_user(user_id) if user_id else self.solana_client.client
+        # 1. Get User Tactical Settings
+        state = await db.get_user_state(user_id) if db else {}
+        state = dict(state) if state else {}
+        tip_sol = state.get('jito_tip_sol', 0.001)
+        tip_lamports = int(tip_sol * 1_000_000_000)
+        auto_refill = state.get('auto_refill_gas', 1)
+
+        client = await self.solana_client.get_client_for_user(user_id)
+        source_kp = Keypair.from_base58_string(source_keypair_base58)
+        
+        # 2. Gas Check & Auto-Refill
+        balance_resp = await client.get_balance(source_kp.pubkey())
+        balance = balance_resp.value
+        min_required = 10000 + tip_lamports # base fee + tip + buffer
 
         try:
-            keypair = Keypair.from_base58_string(source_keypair_base58)
-            
-            # 1. Get current balance
-            balance_resp = await client.get_balance(keypair.pubkey())
-            balance = balance_resp.value
+            if balance < min_required:
+                if auto_refill and config.SAFE_WALLET_PRIVATE_KEY:
+                    logging.info(f"⛽ Auto-Refill: Injecting gas into {source_kp.pubkey()}...")
+                    success = await self._inject_gas(source_kp.pubkey(), client)
+                    if not success:
+                        logging.error("Refill failed. Cannot sweep.")
+                        return None
+                    # Wait for refill confirmation
+                    await asyncio.sleep(2)
+                    balance_resp = await client.get_balance(source_kp.pubkey())
+                    balance = balance_resp.value
+                else:
+                    logging.warning(f"Insufficient gas in {source_kp.pubkey()} and Auto-Refill is OFF.")
+                    return None
 
-            # Fees: base + tip
-            total_fees = 5000 + tip_amount_lamports
-            
-            if balance <= total_fees:
-                logging.warning("Insufficient balance to sweep with Jito tip.")
-                return None
+            # 3. Execute Sweep
+            amount_to_send = balance - tip_lamports - 5000
+            if amount_to_send <= 0: return None
 
-            amount_to_send = balance - total_fees
-            
-            # 2. Construct Instructions
             transfer_ix = transfer(TransferParams(
-                from_pubkey=keypair.pubkey(),
-                to_pubkey=self.safe_wallet,
-                lamports=amount_to_send
+                from_pubkey=source_kp.pubkey(), to_pubkey=self.safe_wallet, lamports=amount_to_send
             ))
-
             tip_account = self.jito_client.get_random_tip_account()
             tip_ix = transfer(TransferParams(
-                from_pubkey=keypair.pubkey(),
-                to_pubkey=tip_account,
-                lamports=tip_amount_lamports
+                from_pubkey=source_kp.pubkey(), to_pubkey=tip_account, lamports=tip_lamports
             ))
 
-            # 3. Create transaction
             recent_blockhash = await client.get_latest_blockhash()
             tx = Transaction()
             tx.add(transfer_ix)
             tx.add(tip_ix)
             tx.recent_blockhash = recent_blockhash.value.blockhash
+            tx.sign(source_kp)
 
-            # 4. Send via Jito
-            tx.sign(keypair)
-            bundle_id = await self.jito_client.send_bundle([tx])
-            
-            if bundle_id:
-                logging.info(f"🚀 Jito Emergency Bundle sent! ID: {bundle_id}")
-                return bundle_id
+            signature = await self.jito_client.send_bundle([tx])
+            logging.info(f"🚀 Rescue Bundle Sent! Tip: {tip_sol} SOL. Sig: {signature}")
+            return signature
+        except Exception as e:
+            logging.error(f"Sweep failed: {e}")
             return None
         finally:
-            # If we created a temporary client, we should close it
             if user_id and client != self.solana_client.client:
                 await client.close()
+
+    async def _inject_gas(self, target_pubkey, client):
+        """Sends a small amount of SOL from the safe wallet to the target."""
+        try:
+            safe_kp = Keypair.from_base58_string(config.SAFE_WALLET_PRIVATE_KEY)
+            # Inject 0.005 SOL (enough for multiple rescue attempts)
+            refill_ix = transfer(TransferParams(
+                from_pubkey=safe_kp.pubkey(),
+                to_pubkey=target_pubkey,
+                lamports=5_000_000 
+            ))
+            recent_blockhash = await client.get_latest_blockhash()
+            tx = Transaction()
+            tx.add(refill_ix)
+            tx.recent_blockhash = recent_blockhash.value.blockhash
+            tx.sign(safe_kp)
+            
+            # Send as high-priority regular tx
+            res = await client.send_raw_transaction(tx.serialize())
+            logging.info(f"⛽ Gas Injected: {res}")
+            return True
+        except Exception as e:
+            logging.error(f"Gas Injection Error: {e}")
+            return False

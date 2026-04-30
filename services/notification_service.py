@@ -77,6 +77,17 @@ class NotificationService:
         self.dp.message.register(self.wizard_skim_retain, SetupWizard.waiting_for_skim_retain)
         self.dp.message.register(self.wizard_skim_threshold, SetupWizard.waiting_for_skim_threshold)
 
+        @self.dp.callback_query(F.data == "toggle_refill")
+        async def handle_toggle_refill(callback: types.CallbackQuery):
+            user_id = str(callback.from_user.id)
+            state = await self.db.get_user_state(user_id)
+            if not state: return
+            
+            new_val = 0 if dict(state).get('auto_refill_gas', 1) else 1
+            await self.db.update_user_state(user_id, auto_refill_gas=new_val)
+            await callback.answer(f"⛽ Auto-Refill {'ENABLED' if new_val else 'DISABLED'}")
+            await self.show_settings_menu()
+
         @self.dp.callback_query(F.data == "toggle_skimming")
         async def handle_toggle_skimming(callback: types.CallbackQuery):
             user_id = str(callback.from_user.id)
@@ -107,6 +118,7 @@ class NotificationService:
         self.dp.message.register(self.settings_command, Command("settings"), StateFilter(None))
         self.dp.message.register(self.faq_command, Command("faq"), StateFilter(None))
         self.dp.message.register(self.premium_command, Command("premium"), StateFilter(None))
+        self.dp.message.register(self.set_tip_command, Command("set_tip"), StateFilter(None))
         self.dp.message.register(self.add_monitored_command, Command("add_monitored"), StateFilter(None))
 
         # Register Wizard Handlers with strict states
@@ -385,11 +397,23 @@ class NotificationService:
         wallets = json.loads(state['monitored_wallets_json'] if state['monitored_wallets_json'] else '[]')
         safe_wallet = state['safe_wallet_address'] or "Not Configured"
         auto_def = "ON" if state['auto_defense'] else "OFF"
+
+        # Gas Tank Health Check
+        from utils.solana_client import SolanaClient
+        sc = SolanaClient(db=self.db)
+        gas_bal = 0
+        gas_warning = ""
+        if safe_wallet != "Not Configured":
+            gas_bal = await sc.get_balance(safe_wallet, user_id=user_id)
+            if gas_bal < 0.05:
+                gas_warning = "\n⚠️ *LOW GAS TANK:* Refill Safe Wallet to enable Jito Rescue."
+
         status_text = (
             f"🛡️ *Guardian Security Report*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"👤 Tier: *{state.get('subscription_tier', 'FREE').upper()}*\n"
             f"🏦 Safe Wallet: `{safe_wallet[:6]}...{safe_wallet[-4:]}`\n"
+            f"⛽ Gas Balance: `{gas_bal} SOL`{gas_warning}\n"
             f"🤖 Auto-Defense: *{auto_def}*\n"
             f"📡 RPC Requests: *{state.get('rpc_usage_count', 0)}*\n"
             f"👀 Monitoring: `{len(wallets)}` Wallets\n"
@@ -548,12 +572,41 @@ class NotificationService:
         await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown", reply_markup=builder.as_markup())
 
     async def show_settings_menu(self):
-        message = "⚙️ *Guardian Settings*\nConfigure your bot's behavior:"
+        user_id = str(config.TELEGRAM_CHAT_ID)
+        state = await self.db.get_user_state(user_id)
+        if not state: return
+        
+        state = dict(state)
+        tip = state.get('jito_tip_sol', 0.001)
+        refill = "ENABLED" if state.get('auto_refill_gas', 1) else "DISABLED"
+        
+        message = (
+            "⚙️ *TACTICAL SETTINGS*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚡ Jito Tip: `{tip} SOL` (Use /set_tip)\n"
+            f"⛽ Auto-Refill: *{refill}*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Configure your bot's behavior:"
+        )
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(text="🤖 Auto-Defense", callback_data="toggle_auto"))
+        builder.row(types.InlineKeyboardButton(text="⛽ Toggle Auto-Refill", callback_data="toggle_refill"))
         builder.row(types.InlineKeyboardButton(text="🍯 Auto-Skimming", callback_data="toggle_skimming"))
         builder.row(types.InlineKeyboardButton(text="🏦 Change Safe Wallet", callback_data="change_safe"))
         await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+    async def set_tip_command(self, message: types.Message):
+        parts = message.text.split()
+        if len(parts) < 2:
+            await message.answer("❌ Usage: `/set_tip [Amount]`\nExample: `/set_tip 0.005`", parse_mode="Markdown")
+            return
+        try:
+            tip = float(parts[1])
+            if tip < 0.0001: raise ValueError
+            await self.db.update_user_state(str(message.from_user.id), jito_tip_sol=tip)
+            await message.answer(f"⚡ *Jito Tip Updated:* `{tip} SOL`", parse_mode="Markdown")
+        except ValueError:
+            await message.answer("❌ Please provide a valid tip amount (minimum 0.0001).")
 
     async def send_status_update(self, message: str):
         await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown")

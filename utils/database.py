@@ -73,6 +73,12 @@ class Database:
             try:
                 await db.execute("ALTER TABLE user_state ADD COLUMN bait_wallets_json TEXT DEFAULT '[]'")
             except Exception: pass
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN jito_tip_sol FLOAT DEFAULT 0.001")
+            except Exception: pass
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN auto_refill_gas BOOLEAN DEFAULT 1")
+            except Exception: pass
             
             await db.commit()
             await db.execute("""
