@@ -53,7 +53,10 @@ class Database:
                     skimming_enabled BOOLEAN DEFAULT FALSE,
                     skimming_threshold REAL DEFAULT 0.02,
                     skimming_retain REAL DEFAULT 0.01,
-                    custom_rpc_url TEXT
+                    custom_rpc_url TEXT,
+                    bait_wallets_json TEXT DEFAULT '[]',
+                    subscription_tier TEXT DEFAULT 'free',
+                    subscription_expiry DATETIME
                 )
             ''')
             # Secure Wallet Vault
@@ -109,6 +112,12 @@ class Database:
             db.row_factory = aiosqlite.Row # <--- Added this line
             async with db.execute("SELECT * FROM user_state WHERE user_id = ?", (user_id,)) as cursor:
                 return await cursor.fetchone()
+
+    async def get_all_user_states(self):
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            async with db.execute("SELECT * FROM user_state") as cursor:
+                return await cursor.fetchall()
 
 
     async def log_threat(self, wallet, score, reasons, signature):

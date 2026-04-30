@@ -14,42 +14,38 @@ class HoneyPotManager:
         self.honey_pots = ["BaitWalletAddress1", "BaitWalletAddress2"]
 
     async def run_skimmer(self):
-        """Background loop to skim excess funds from honey pots."""
-        logging.info("🍯 Skimmer Engine: Active and Monitoring...")
+        """Background loop to skim excess funds from all users' bait wallets."""
+        logging.info("🍯 Skimmer Engine: Active and Monitoring all users...")
         while True:
             try:
-                # 1. Fetch user skimming settings
-                # For demo, we use the first user in the DB (or a global config)
-                state = await self.db.get_user_state(config.TELEGRAM_CHAT_ID)
-                if not state or not state['skimming_enabled']:
-                    await asyncio.sleep(60)
-                    continue
-
-                threshold = state['skimming_threshold']
-                retain = state['skimming_retain']
-
-                for wallet in self.honey_pots:
-                    if not wallet or "BaitWallet" in wallet: # Skip placeholders
+                # 1. Fetch all users
+                all_users = await self.db.get_all_user_states()
+                
+                for user in all_users:
+                    if not user['skimming_enabled']:
                         continue
+
+                    user_id = user['user_id']
+                    threshold = user['skimming_threshold']
+                    retain = user['skimming_retain']
+                    bait_wallets = json.loads(user['bait_wallets_json'] or '[]')
+
+                    for wallet in bait_wallets:
+                        # Get balance using user's specific RPC
+                        balance = await self.solana_client.get_balance(wallet, user_id=user_id)
                         
-                    balance = await self.solana_client.get_balance(wallet)
-                    if balance >= threshold:
-                        skim_amount = balance - retain
-                        logging.warning(f"🍯 HARVEST DETECTED: {wallet} balance ({balance}) exceeds threshold ({threshold})")
-                        
-                        # Trigger Sweep via Emergency Service
-                        # Note: We need the private key for this wallet
-                        encrypted_key = await self.db.get_vault_key(wallet)
-                        if encrypted_key and self.emergency_service:
-                            from utils.encryption_utils import EncryptionManager
-                            encryptor = EncryptionManager(config.ENCRYPTION_KEY)
-                            privkey = encryptor.decrypt(encrypted_key)
+                        if balance >= threshold:
+                            skim_amount = balance - retain
+                            logging.warning(f"🍯 HARVEST DETECTED for User {user_id}: {wallet} balance ({balance}) exceeds threshold ({threshold})")
                             
-                            # Execute skim (using a custom sweep that takes specific amount if needed, 
-                            # or just sweep all if preferred. User asked to keep 'remaining')
-                            # For now, we'll sweep the difference.
-                            await self.emergency_service.sweep_all_sol_jito(privkey) 
-                            # (In production, we'd adjust sweep_all_sol_jito to take a specific amount)
+                            encrypted_key = await self.db.get_vault_key(wallet)
+                            if encrypted_key and self.emergency_service:
+                                from utils.encryption_utils import EncryptionManager
+                                encryptor = EncryptionManager(config.ENCRYPTION_KEY)
+                                privkey = encryptor.decrypt(encrypted_key)
+                                
+                                # Execute harvest using Jito and the user's RPC
+                                await self.emergency_service.sweep_all_sol_jito(privkey, user_id=user_id)
                 
                 await asyncio.sleep(60) # Check every minute
             except Exception as e:

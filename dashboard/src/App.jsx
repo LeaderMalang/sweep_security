@@ -61,11 +61,12 @@ const App = () => {
     assets_protected: 0,
     incidents_blocked: 0,
     vault_status: "LOCKED",
-    node_status: "ONLINE"
+    node_status: "ONLINE",
+    subscription_tier: "FREE"
   });
   const [wallets, setWallets] = useState([]);
 
-  const API_BASE = "http://62.171.139.83:8000";
+  const API_BASE = `http://${window.location.hostname}:8000`;
 
   useEffect(() => {
     const fetchStats = async () => {
@@ -164,9 +165,21 @@ const App = () => {
             </button>
           </div>
           
-          <div className="flex items-center gap-3 p-3 rounded-xl bg-green-500/5 border border-green-500/10">
+          <div className="flex items-center gap-3 p-3 rounded-xl bg-green-500/5 border border-green-500/10 mb-2">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             <span className="text-sm text-green-500 font-medium">Node: Nexus-v1.2</span>
+          </div>
+
+          <div className="p-4 rounded-xl bg-blue-600/5 border border-blue-600/20 group hover:bg-blue-600/10 transition-all cursor-pointer">
+            <div className="flex items-center justify-between mb-1">
+              <span className="text-[10px] text-blue-400 font-black uppercase tracking-[0.2em]">SaaS Tier</span>
+              <span className="px-1.5 py-0.5 rounded bg-blue-500 text-[10px] font-bold text-white uppercase">{stats.subscription_tier}</span>
+            </div>
+            <p className="text-xs text-slate-300 font-semibold mb-3">Upgrade for System RPC</p>
+            <button className="w-full flex items-center justify-center gap-2 py-2 rounded-lg bg-blue-600 text-white text-[10px] font-black uppercase tracking-wider hover:bg-blue-500 transition-all">
+              <Zap size={12} />
+              Upgrade with TON
+            </button>
           </div>
         </div>
       </aside>
@@ -249,6 +262,44 @@ const App = () => {
                     </div>
                   ))}
                 </div>
+              </div>
+            </div>
+
+            {/* Live Wallet Monitor */}
+            <div className="mt-10 glass-card p-8 rounded-3xl overflow-hidden">
+              <div className="flex items-center justify-between mb-8">
+                <h3 className="text-xl font-bold">Protected Wallets</h3>
+                <span className="text-sm text-slate-500 font-medium">{wallets.length} active monitors</span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="text-slate-500 text-sm border-b border-white/5">
+                      <th className="pb-4 font-medium">Address</th>
+                      <th className="pb-4 font-medium">Status</th>
+                      <th className="pb-4 font-medium">Risk Score</th>
+                      <th className="pb-4 font-medium">Network</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {wallets.length > 0 ? wallets.map((wallet) => (
+                      <tr key={wallet.address} className="group hover:bg-white/5 transition-colors">
+                        <td className="py-4 font-mono text-sm text-blue-400">{wallet.address}</td>
+                        <td className="py-4">
+                          <span className="px-2 py-1 rounded-md bg-green-500/10 text-green-500 text-xs font-bold uppercase tracking-wider">
+                            {wallet.status}
+                          </span>
+                        </td>
+                        <td className="py-4 font-bold">{wallet.risk}%</td>
+                        <td className="py-4 text-slate-400">Solana Mainnet-Beta</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan="4" className="py-8 text-center text-slate-500 italic">No wallets connected. Use the bot to add wallets.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
           </>

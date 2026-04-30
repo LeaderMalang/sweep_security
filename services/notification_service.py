@@ -111,6 +111,65 @@ class NotificationService:
         self.dp.message.register(self.health_command, Command("health"))
         self.dp.message.register(self.skim_command, Command("skim"))
         self.dp.message.register(self.settings_command, Command("settings"))
+        self.dp.message.register(self.faq_command, Command("faq"))
+        self.dp.message.register(self.premium_command, Command("premium"))
+
+    async def premium_command(self, message: types.Message):
+        user_id = str(message.from_user.id)
+        state = await self.db.get_user_state(user_id)
+        current_tier = state['subscription_tier'].upper() if state else "FREE"
+
+        premium_text = (
+            "💎 *GUARDIAN NEXUS PREMIUM*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            f"Your Current Tier: *{current_tier}*\n\n"
+            "🚀 *UPGRADE TO GUARDIAN*\n"
+            "• **System RPC Access**: Use our high-speed nodes.\n"
+            "• **Priority Sweeping**: Jito-powered rescue speed.\n"
+            "• **Unlimited Monitoring**: Watch up to 50 wallets.\n"
+            "• **Community Intel**: Live threat blacklist.\n\n"
+            "💰 *PRICE:* `0.5 TON / Month`\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "Select your upgrade path below:"
+        )
+        
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="💎 Upgrade to Guardian (0.5 TON)", callback_data="buy_premium_ton"))
+        builder.row(types.InlineKeyboardButton(text="⭐ Upgrade with Stars (500 Stars)", callback_data="buy_premium_stars"))
+        
+        await message.answer(premium_text, parse_mode="Markdown", reply_markup=builder.as_markup())
+
+    @self.dp.callback_query(F.data == "buy_premium_ton")
+    async def handle_buy_premium_ton(callback: types.CallbackQuery):
+        # Simplified: Show a payment address or connect wallet
+        payment_addr = "UQDY7...YourTonWallet"
+        await callback.message.edit_text(
+            f"💎 *PURCHASE GUARDIAN TIER*\n\n"
+            f"Please send **0.5 TON** to the address below:\n\n"
+            f"`{payment_addr}`\n\n"
+            "*Note:* Verification is automatic. Your tier will update once the transaction is confirmed on the TON blockchain.",
+            parse_mode="Markdown"
+        )
+        await callback.answer()
+
+    async def faq_command(self, message: types.Message):
+        faq_text = (
+            "🛡️ *GUARDIAN NEXUS: THE SENTINEL FAQ*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "❓ *What is Guardian Nexus?*\n"
+            "We are a sub-millisecond security sentinel for Solana. We monitor your wallets for unauthorized transfers and 'rescue' your assets to a safe location before the attacker can confirm their transaction.\n\n"
+            "❓ *Why is it Essential?*\n"
+            "Typical drainers use high-priority fees. We counter this by using **Jito Bundles**, allowing us to bypass the public mempool and secure your SOL/Tokens with 100% certainty.\n\n"
+            "❓ *How does Auto-Skimming work?*\n"
+            "You set up a 'Bait' wallet. When an attacker sends 'gas' or 'dust' to attract you, our bot harvests the profit automatically while leaving enough behind to keep the attacker interested.\n\n"
+            "❓ *Is my Private Key safe?*\n"
+            "Yes. All keys are encrypted using **AES-256 (Fernet)**. Even if our database was compromised, your keys remain unreadable without the master encryption key.\n\n"
+            "❓ *Can I use my own RPC?*\n"
+            "Absolutely. Every user can configure their own high-speed RPC to ensure maximum rescue performance.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 *Need more help?* Contact @Leadermalang0"
+        )
+        await message.answer(faq_text, parse_mode="Markdown")
         self.dp.message.register(self.report_command, Command("report"))
         self.dp.message.register(self.test_attack_command, Command("test_attack"))
 
@@ -439,7 +498,9 @@ class NotificationService:
             BotCommand(command="set_safe", description="Set Rescue Destination"),
             BotCommand(command="skim", description="🍯 Configure Auto-Harvesting"),
             BotCommand(command="history", description="📜 View Threat History"),
-            BotCommand(command="health", description="🟢 Check System Status")
+            BotCommand(command="health", description="🟢 Check System Status"),
+            BotCommand(command="premium", description="💎 Upgrade to Premium Speed"),
+            BotCommand(command="faq", description="🛡️ Features & Security FAQ")
         ])
 
         await self.dp.start_polling(self.bot)

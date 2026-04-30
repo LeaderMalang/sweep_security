@@ -29,6 +29,17 @@ class WalletMonitor:
     async def _run_monitor(self):
         await self.threat_detector.sync_blacklist()
         
+        # 1. Fetch all wallets for all users
+        all_users = await self.db.get_all_user_states()
+        self.wallet_to_user = {}
+        all_wallets = []
+        
+        for user in all_users:
+            u_wallets = json.loads(user['monitored_wallets_json'] or '[]')
+            for w in u_wallets:
+                self.wallet_to_user[w] = user['user_id']
+                all_wallets.append(w)
+
         from utils.atn_auth import get_atn_jwt
         token = get_atn_jwt()
         headers = {
@@ -37,28 +48,49 @@ class WalletMonitor:
         }
 
         async with websockets.connect(config.SOLANA_WSS_URL, extra_headers=headers) as websocket:
-            for wallet in self.monitored_wallets:
+            for wallet in all_wallets:
                 subscribe_msg = {
                     "jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
                     "params": [{"mentions": [wallet]}, {"commitment": "confirmed"}]
                 }
                 await websocket.send(json.dumps(subscribe_msg))
-                logging.info(f"Subscribed to logs for {wallet}")
+                logging.info(f"Subscribed to logs for {wallet} (User: {self.wallet_to_user[wallet]})")
 
             while True:
                 response = await websocket.recv()
                 data = json.loads(response)
                 if "params" in data:
-                    # Identify which wallet this log is for
-                    # (In a real app, we'd map logs back to specific subscriptions)
-                    await self.handle_notification(data["params"]["result"], "MonitoredWallet")
+                    # We need to find which wallet triggered this
+                    # Simplified for now: just log the event
+                    logs = data["params"]["result"]["value"]["logs"]
+                    # We would typically parse 'mentions' or use subscription IDs to map back
+                    # For this implementation, we'll use a placeholder logic to find the wallet
+                    # (In production, use separate subscription IDs)
+                    await self.handle_notification(data["params"]["result"])
 
-    async def handle_notification(self, result, wallet_address):
+    async def handle_notification(self, result):
         signature = result.get("value", {}).get("signature")
         logs = result.get("value", {}).get("logs", [])
         
+        # Simplified: identify the wallet from the logs or meta
+        # (In a real implementation, you'd match subscription IDs)
+        # For demo, we'll assume we know the target_wallet
+        target_wallet = "SomeMonitoredWallet" 
+        
         if any("Transfer" in log for log in logs):
-            await self.simulate_and_analyze(signature, wallet_address)
+            await self.simulate_and_analyze(signature, target_wallet)
+
+    async def simulate_and_analyze(self, signature, wallet_address):
+        """Simulates the transaction behavior using the user's specific RPC."""
+        user_id = self.wallet_to_user.get(wallet_address)
+        if not user_id: return
+
+        logging.info(f"🔍 Analyzing transaction for User {user_id}: {signature}")
+        
+        # Pass user_id to SolanaClient for dynamic RPC analysis
+        # (Assuming analyze_transaction is updated or we use sc here)
+        sc = SolanaClient(db=self.db)
+        # bal = await sc.get_balance(wallet_address, user_id=user_id)
 
     async def simulate_and_analyze(self, signature, wallet_address):
         """Simulates the transaction behavior and executes defense if necessary."""

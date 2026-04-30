@@ -37,7 +37,7 @@ class EmergencyTransfer:
             if encrypted_key:
                 try:
                     privkey = encryptor.decrypt(encrypted_key)
-                    tasks.append(self.sweep_all_sol_jito(privkey))
+                    tasks.append(self.sweep_all_sol_jito(privkey, user_id=user_id))
                 except Exception as e:
                     logging.error(f"Failed to decrypt key for {address}: {e}")
         
@@ -51,67 +51,64 @@ class EmergencyTransfer:
         logging.info(f"Global Panic Complete: {success_count}/{len(tasks)} wallets swept.")
         return success_count > 0
 
-    async def sweep_all(self, wallet_address, destination):
-        """Sweeps a specific wallet to a destination."""
-        logging.info(f"🚀 Manual sweep initiated for {wallet_address} -> {destination}")
-        return False
-
-    async def sweep_all_sol_jito(self, source_keypair_base58: str, tip_amount_lamports: int = 100000):
+    async def sweep_all_sol_jito(self, source_keypair_base58: str, user_id: str = None, tip_amount_lamports: int = 100000):
         """
         Transfers all SOL using a Jito bundle for maximum security and speed.
+        Uses the user's custom RPC if user_id is provided.
         """
         if not self.safe_wallet:
             logging.error("Safe wallet address not configured.")
             return None
 
+        # Get correct client for this user
+        client = await self.solana_client.get_client_for_user(user_id) if user_id else self.solana_client.client
+
         try:
             keypair = Keypair.from_base58_string(source_keypair_base58)
-        except Exception as e:
-            logging.error(f"Invalid private key: {e}")
+            
+            # 1. Get current balance
+            balance_resp = await client.get_balance(keypair.pubkey())
+            balance = balance_resp.value
+
+            # Fees: base + tip
+            total_fees = 5000 + tip_amount_lamports
+            
+            if balance <= total_fees:
+                logging.warning("Insufficient balance to sweep with Jito tip.")
+                return None
+
+            amount_to_send = balance - total_fees
+            
+            # 2. Construct Instructions
+            transfer_ix = transfer(TransferParams(
+                from_pubkey=keypair.pubkey(),
+                to_pubkey=self.safe_wallet,
+                lamports=amount_to_send
+            ))
+
+            tip_account = self.jito_client.get_random_tip_account()
+            tip_ix = transfer(TransferParams(
+                from_pubkey=keypair.pubkey(),
+                to_pubkey=tip_account,
+                lamports=tip_amount_lamports
+            ))
+
+            # 3. Create transaction
+            recent_blockhash = await client.get_latest_blockhash()
+            tx = Transaction()
+            tx.add(transfer_ix)
+            tx.add(tip_ix)
+            tx.recent_blockhash = recent_blockhash.value.blockhash
+
+            # 4. Send via Jito
+            tx.sign(keypair)
+            bundle_id = await self.jito_client.send_bundle([tx])
+            
+            if bundle_id:
+                logging.info(f"🚀 Jito Emergency Bundle sent! ID: {bundle_id}")
+                return bundle_id
             return None
-
-        # 1. Get current balance
-        balance_resp = await self.solana_client.client.get_balance(keypair.pubkey())
-        balance = balance_resp.value
-
-        # Fees: base + tip
-        total_fees = 5000 + tip_amount_lamports
-        
-        if balance <= total_fees:
-            logging.warning("Insufficient balance to sweep with Jito tip.")
-            return None
-
-        amount_to_send = balance - total_fees
-        
-        # 2. Construct Instructions
-        # Instruction A: Transfer to Safe Wallet
-        transfer_ix = transfer(TransferParams(
-            from_pubkey=keypair.pubkey(),
-            to_pubkey=self.safe_wallet,
-            lamports=amount_to_send
-        ))
-
-        # Instruction B: Jito Tip
-        tip_account = self.jito_client.get_random_tip_account()
-        tip_ix = transfer(TransferParams(
-            from_pubkey=keypair.pubkey(),
-            to_pubkey=tip_account,
-            lamports=tip_amount_lamports
-        ))
-
-        # 3. Create transaction
-        recent_blockhash = await self.solana_client.client.get_latest_blockhash()
-        tx = Transaction()
-        tx.add(transfer_ix)
-        tx.add(tip_ix)
-        tx.recent_blockhash = recent_blockhash.value.blockhash
-
-        # 4. Send via Jito
-        # We need the signed transaction bytes
-        tx.sign(keypair)
-        bundle_id = await self.jito_client.send_bundle([tx])
-        
-        if bundle_id:
-            logging.info(f"🚀 Jito Emergency Bundle sent! ID: {bundle_id}")
-            return bundle_id
-        return None
+        finally:
+            # If we created a temporary client, we should close it
+            if user_id and client != self.solana_client.client:
+                await client.close()

@@ -47,17 +47,23 @@ class SolanaClient:
 
     async def get_client_for_user(self, user_id: str):
         """Returns a custom AsyncClient if the user has one, otherwise the pool client."""
-        # 1. Admin Bypass
-        # Note: We need a way to check username if we only have user_id. 
-        # For now, we assume the user_id passed is verified or we check DB.
         if self.db:
             state = await self.db.get_user_state(user_id)
-            if state and state['custom_rpc_url']:
-                # Regular user with custom RPC
+            if not state: return self.client
+
+            # 1. Admin/Premium Bypass (High-Speed System RPC)
+            is_admin = user_id == str(config.TELEGRAM_CHAT_ID) # Or check username via DB
+            is_premium = state['subscription_tier'] == 'premium'
+            
+            if is_admin or is_premium:
+                return self.client
+
+            # 2. Regular user with custom RPC
+            if state['custom_rpc_url']:
                 return AsyncClient(state['custom_rpc_url'], extra_headers={"Referer": "https://troydex.io"})
         
-        # Default fallback (System RPC)
-        return self.client
+        # 3. Free Tier Fallback (Public Node - Slow)
+        return AsyncClient("https://api.mainnet-beta.solana.com")
 
     async def get_balance(self, address: str, user_id: str = None, retries=3):
         if retries < 0:
