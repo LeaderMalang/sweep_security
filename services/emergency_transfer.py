@@ -126,8 +126,18 @@ class EmergencyTransfer:
             signature = await self.jito_client.send_bundle([tx])
             if signature:
                 SignatureRegistry().register(signature)
-            logging.info(f"🚀 Rescue Bundle Sent! Tip: {tip_sol} SOL. Sig: {signature}")
-            return signature
+                logging.info(f"🚀 Rescue Bundle Sent! Tip: {tip_sol} SOL. Sig: {signature}")
+                return signature
+            
+            # FALLBACK: If Jito fails, send via regular RPC
+            logging.warning("⚠️ Jito Bundle failed. Falling back to standard RPC broadcast...")
+            signature = await client.send_raw_transaction(bytes(tx))
+            if signature:
+                SignatureRegistry().register(str(signature.value))
+                logging.info(f"✅ Fallback Sweep Success! Sig: {signature.value}")
+                return str(signature.value)
+
+            return None
         except Exception as e:
             logging.error(f"Sweep failed: {e}")
             return None
