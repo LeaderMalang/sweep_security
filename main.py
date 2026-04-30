@@ -63,7 +63,7 @@ async def main():
     notification_service.emergency_service = emergency_service
     wallet_monitor = WalletMonitor(threat_detector, notification_service, db, emergency_service)
     evm_monitor = EVMMonitor(threat_detector, notification_service)
-    honey_pot_manager = HoneyPotManager(db=db, threat_detector=threat_detector)
+    honey_pot_manager = HoneyPotManager(db=db, threat_detector=threat_detector, emergency_service=emergency_service)
 
     # 6. Start API Bridge (Phase 34)
     from api.server import app, state as api_state
@@ -82,6 +82,7 @@ async def main():
             wallet_monitor.monitor(),
             evm_monitor.monitor(),
             honey_pot_manager.start_monitoring(),
+            honey_pot_manager.run_skimmer(),
             p2p_network.listen_for_updates(),
             hygiene_manager.start_hygiene_loops(),
             gas_tank.monitor_gas_levels([config.SAFE_WALLET_ADDRESS]),

@@ -233,6 +233,33 @@ class NotificationService:
             except Exception as e:
                 await message.answer(f"🔴 *SYSTEM HEALTH:* Critical\n📡 RPC Error: {str(e)[:50]}...", parse_mode="Markdown")
 
+        @self.dp.message(Command("skim"))
+        async def skim_command(message: types.Message):
+            parts = message.text.split()
+            if len(parts) < 3:
+                await message.answer("❌ Usage: `/skim [Retain_Amount] [Threshold]`\nExample: `/skim 0.01 0.02`", parse_mode="Markdown")
+                return
+            
+            try:
+                retain = float(parts[1])
+                threshold = float(parts[2])
+                user_id = str(message.from_user.id)
+                await self.db.update_user_state(user_id, skimming_retain=retain, skimming_threshold=threshold, skimming_enabled=True)
+                await message.answer(f"🍯 *Auto-Skimming Configured!*\nRetain: `{retain} SOL`\nTrigger: `{threshold} SOL`", parse_mode="Markdown")
+            except ValueError:
+                await message.answer("❌ Invalid amounts. Please use numbers.")
+
+        @self.dp.callback_query(F.data == "toggle_skimming")
+        async def handle_toggle_skimming(callback: types.CallbackQuery):
+            user_id = str(callback.from_user.id)
+            state = await self.db.get_user_state(user_id)
+            current = state['skimming_enabled'] if state else False
+            await self.db.update_user_state(user_id, skimming_enabled=not current)
+            
+            new_status = "ON" if not current else "OFF"
+            await callback.message.edit_text(f"🍯 Auto-Skimming is now: *{new_status}*", parse_mode="Markdown")
+            await callback.answer(f"Skimming {new_status}")
+
         @self.dp.message(Command("settings"))
         async def settings_command(message: types.Message):
             await self.show_settings_menu()
@@ -261,7 +288,8 @@ class NotificationService:
     async def show_settings_menu(self):
         message = "⚙️ *Guardian Settings*\nConfigure your bot's behavior:"
         builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="🤖 Auto-Defense: ON", callback_data="toggle_auto"))
+        builder.row(types.InlineKeyboardButton(text="🤖 Auto-Defense", callback_data="toggle_auto"))
+        builder.row(types.InlineKeyboardButton(text="🍯 Auto-Skimming", callback_data="toggle_skimming"))
         builder.row(types.InlineKeyboardButton(text="🏦 Change Safe Wallet", callback_data="change_safe"))
         await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown", reply_markup=builder.as_markup())
 

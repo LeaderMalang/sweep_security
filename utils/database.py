@@ -47,7 +47,10 @@ class Database:
                     hardware_wallet BOOLEAN DEFAULT FALSE,
                     safe_wallet_configured BOOLEAN DEFAULT FALSE,
                     safe_wallet_address TEXT,
-                    monitored_wallets_json TEXT DEFAULT '[]'
+                    monitored_wallets_json TEXT DEFAULT '[]',
+                    skimming_enabled BOOLEAN DEFAULT FALSE,
+                    skimming_threshold REAL DEFAULT 0.02,
+                    skimming_retain REAL DEFAULT 0.01
                 )
             ''')
             # Secure Wallet Vault
