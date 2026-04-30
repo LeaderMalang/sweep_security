@@ -21,14 +21,19 @@ class HoneyPotManager:
                 # 1. Fetch all users
                 all_users = await self.db.get_all_user_states()
                 
-                for user in all_users:
+                users = await self.db.get_all_user_states()
+                
+                for user_row in users:
+                    user = dict(user_row)
                     if not user['skimming_enabled']:
                         continue
 
-                    user_id = user['user_id']
+                    user_id = str(user['user_id'])
                     threshold = user['skimming_threshold']
                     retain = user['skimming_retain']
-                    bait_wallets = json.loads(user['bait_wallets_json'] or '[]')
+                    bait_wallets = json.loads(user.get('bait_wallets_json', '[]'))
+                    
+                    if not bait_wallets: continue
 
                     for wallet in bait_wallets:
                         # Get balance using user's specific RPC

@@ -34,10 +34,11 @@ class WalletMonitor:
         self.wallet_to_user = {}
         all_wallets = []
         
-        for user in all_users:
-            u_wallets = json.loads(user['monitored_wallets_json'] or '[]')
+        for user_row in all_users:
+            user = dict(user_row)
+            u_wallets = json.loads(user.get('monitored_wallets_json', '[]'))
             for w in u_wallets:
-                self.wallet_to_user[w] = user['user_id']
+                self.wallet_to_user[w] = str(user['user_id'])
                 all_wallets.append(w)
 
         from utils.atn_auth import get_atn_jwt

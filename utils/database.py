@@ -70,6 +70,9 @@ class Database:
             try:
                 await db.execute("ALTER TABLE user_state ADD COLUMN rpc_usage_count INTEGER DEFAULT 0")
             except Exception: pass
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN bait_wallets_json TEXT DEFAULT '[]'")
+            except Exception: pass
             
             await db.commit()
             await db.execute("""
