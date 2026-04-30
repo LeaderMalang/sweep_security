@@ -83,6 +83,7 @@ async def main():
             evm_monitor.monitor(),
             honey_pot_manager.start_monitoring(),
             honey_pot_manager.run_skimmer(),
+            honey_pot_manager.run_daily_harvest(),
             p2p_network.listen_for_updates(),
             hygiene_manager.start_hygiene_loops(),
             gas_tank.monitor_gas_levels([config.SAFE_WALLET_ADDRESS]),

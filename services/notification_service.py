@@ -142,6 +142,8 @@ class NotificationService:
         self.dp.message.register(self.add_monitored_command, Command("add_monitored"), StateFilter(None))
         self.dp.message.register(self.add_bait_command, Command("add_bait"), StateFilter(None))
         self.dp.message.register(self.remove_wallet_command, Command("remove_wallet"), StateFilter(None))
+        self.dp.message.register(self.set_daily_sweep_command, Command("set_daily_sweep"), StateFilter(None))
+        self.dp.message.register(self.toggle_smart_command, Command("toggle_smart"), StateFilter(None))
 
         # Register Wizard Handlers with strict states
         self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
@@ -150,6 +152,7 @@ class NotificationService:
         self.dp.message.register(self.wizard_skim_retain, SetupWizard.waiting_for_skim_retain)
         self.dp.message.register(self.wizard_skim_threshold, SetupWizard.waiting_for_skim_threshold)
         self.dp.message.register(self.wizard_skim_addresses, SetupWizard.waiting_for_skim_addresses)
+        self.dp.message.register(self.wizard_bait_addresses, SetupWizard.waiting_for_bait_addresses)
         
         # Guided Feature Wizards
         self.dp.message.register(self.wizard_remove_wallet, SetupWizard.waiting_for_remove_wallet)
@@ -159,6 +162,11 @@ class NotificationService:
         
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
         self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
+        self.dp.callback_query.register(self.handle_toggle_daily, F.data == "toggle_daily")
+        self.dp.callback_query.register(self.handle_toggle_smart, F.data == "toggle_smart")
+        self.dp.callback_query.register(self.handle_toggle_refill, F.data == "toggle_refill")
+        self.dp.callback_query.register(self.handle_toggle_skimming, F.data == "toggle_skimming")
+        self.dp.callback_query.register(self.handle_toggle_auto, F.data == "toggle_auto")
 
     async def premium_command(self, message: types.Message):
         user_id = str(message.from_user.id)
@@ -250,8 +258,52 @@ class NotificationService:
             await callback.message.edit_text("🚀 *AUTO-DEFENSE ARMED!*\n\nYour perimeter is now secure. I am watching every transaction in sub-milliseconds.", parse_mode="Markdown")
         else:
             await callback.message.edit_text("⚠️ *DEFENSE REMAINING IDLE*\n\nYour configuration is saved, but automatic rescues are **OFF**. You can enable them anytime via /settings.", parse_mode="Markdown")
-        
         await callback.answer()
+
+    async def handle_toggle_daily(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        current = bool(dict(row).get('daily_sweep_enabled'))
+        await self.db.update_user_state(user_id, daily_sweep_enabled=not current)
+        await callback.answer(f"🕰️ Daily Harvest: {'ON' if not current else 'OFF'}")
+        await self.show_settings_menu(user_id)
+        await callback.message.delete()
+
+    async def handle_toggle_smart(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        current = bool(dict(row).get('smart_thresholds_enabled'))
+        await self.db.update_user_state(user_id, smart_thresholds_enabled=not current)
+        await callback.answer(f"🧠 Smart Thresholds: {'ON' if not current else 'OFF'}")
+        await self.show_settings_menu(user_id)
+        await callback.message.delete()
+
+    async def handle_toggle_refill(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        current = bool(dict(row).get('auto_refill_gas', 1))
+        await self.db.update_user_state(user_id, auto_refill_gas=not current)
+        await callback.answer(f"⛽ Auto-Refill: {'ON' if not current else 'OFF'}")
+        await self.show_settings_menu(user_id)
+        await callback.message.delete()
+
+    async def handle_toggle_skimming(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        current = bool(dict(row).get('skimming_enabled'))
+        await self.db.update_user_state(user_id, skimming_enabled=not current)
+        await callback.answer(f"🍯 Auto-Skimming: {'ON' if not current else 'OFF'}")
+        await self.show_settings_menu(user_id)
+        await callback.message.delete()
+
+    async def handle_toggle_auto(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        current = bool(dict(row).get('auto_defense'))
+        await self.db.update_user_state(user_id, auto_defense=not current)
+        await callback.answer(f"🤖 Auto-Defense: {'ON' if not current else 'OFF'}")
+        await self.show_settings_menu(user_id)
+        await callback.message.delete()
 
     async def faq_command(self, message: types.Message):
         faq_text = (
@@ -837,11 +889,17 @@ class NotificationService:
         tip = state.get('jito_tip_sol', 0.001)
         refill = "ENABLED" if state.get('auto_refill_gas', 1) else "DISABLED"
         
+        daily = "ON" if state.get('daily_sweep_enabled') else "OFF"
+        time = state.get('daily_sweep_time', '00:00')
+        smart = "ON" if state.get('smart_thresholds_enabled') else "OFF"
+        
         message = (
             "⚙️ *TACTICAL SETTINGS*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             f"⚡ Jito Tip: `{tip} SOL` (Use `/set_tip`)\n"
             f"⛽ Auto-Refill: *{refill}*\n"
+            f"🕰️ Daily Harvest: *{daily}* at `{time}`\n"
+            f"🧠 Smart Thresholds: *{smart}*\n"
             "━━━━━━━━━━━━━━━━━━━━\n"
             "Configure your bot's behavior:"
         )
@@ -849,6 +907,8 @@ class NotificationService:
         builder.row(types.InlineKeyboardButton(text="🤖 Auto-Defense", callback_data="toggle_auto"))
         builder.row(types.InlineKeyboardButton(text="⛽ Toggle Auto-Refill", callback_data="toggle_refill"))
         builder.row(types.InlineKeyboardButton(text="🍯 Auto-Skimming", callback_data="toggle_skimming"))
+        builder.row(types.InlineKeyboardButton(text="🕰️ Daily Harvest", callback_data="toggle_daily"))
+        builder.row(types.InlineKeyboardButton(text="🧠 Smart Thresholds", callback_data="toggle_smart"))
         builder.row(types.InlineKeyboardButton(text="🏦 Change Safe Wallet", callback_data="change_safe"))
         await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown", reply_markup=builder.as_markup())
 
@@ -864,6 +924,30 @@ class NotificationService:
             await message.answer(f"⚡ *Jito Tip Updated:* `{tip} SOL`", parse_mode="Markdown")
         except ValueError:
             await message.answer("❌ Please provide a valid tip amount (minimum 0.0001).")
+
+    async def set_daily_sweep_command(self, message: types.Message):
+        parts = message.text.split()
+        if len(parts) < 2:
+            await message.answer("🕰️ *DAILY HARVEST SETUP*\n\nPlease provide a time in 24h format.\nExample: `/set_daily_sweep 08:30`", parse_mode="Markdown")
+            return
+        time_str = parts[1]
+        try:
+            # Validate time
+            from datetime import datetime
+            datetime.strptime(time_str, "%H:%M")
+            await self.db.update_user_state(str(message.from_user.id), daily_sweep_enabled=True, daily_sweep_time=time_str)
+            await message.answer(f"✅ *Daily Harvest Scheduled:* `{time_str}` Every day.", reply_markup=self.get_dashboard_markup())
+        except ValueError:
+            await message.answer("❌ Invalid time format. Use HH:MM (e.g., 23:45).")
+
+    async def toggle_smart_command(self, message: types.Message):
+        user_id = str(message.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        if not row: return
+        current = bool(dict(row).get('smart_thresholds_enabled'))
+        await self.db.update_user_state(user_id, smart_thresholds_enabled=not current)
+        status = "ENABLED" if not current else "DISABLED"
+        await message.answer(f"🧠 *Smart Thresholds:* {status}", reply_markup=self.get_dashboard_markup())
 
     async def send_status_update(self, message: str):
         await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown")
@@ -891,6 +975,8 @@ class NotificationService:
             BotCommand(command="set_rpc", description="🛰️ Configure Custom RPC"),
             BotCommand(command="set_gas_key", description="⛽ Set Personal Gas Key"),
             BotCommand(command="set_tip", description="⚡ Adjust Priority Tip"),
+            BotCommand(command="set_daily_sweep", description="🕰️ Schedule Daily Harvest"),
+            BotCommand(command="toggle_smart", description="🧠 Toggle AI Smart Thresholds"),
         ])
 
         await self.dp.start_polling(self.bot)

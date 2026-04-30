@@ -7,22 +7,16 @@ from utils.atn_auth import get_atn_jwt
 
 class SolanaConnectionPool:
     def __init__(self):
-        self.endpoints = [config.SOLANA_RPC_URL]
+        self.endpoints = config.SOLANA_RPC_URLS
         
-        # Get JWT for All That Node if private.pem exists
+        # Get JWT for All That Node
         token = get_atn_jwt()
+        headers = {"Referer": "https://troydex.io"}
         if token:
+            headers["Authorization"] = f"Bearer {token}"
             logging.info("🔑 ATN Auth: JWT generated successfully.")
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {token}",
-                "Referer": "https://troydex.io"
-            }
-        else:
-            logging.warning("⚠️ ATN Auth: No JWT generated (check private.pem).")
-            headers = {"Referer": "https://troydex.io"}
         
-        # Use extra_headers keyword for authorization
+        # Initialize pool of clients
         self.clients = [AsyncClient(e, extra_headers=headers) for e in self.endpoints]
         self.current_index = 0
 

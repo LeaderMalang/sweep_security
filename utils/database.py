@@ -79,6 +79,15 @@ class Database:
             try:
                 await db.execute("ALTER TABLE user_state ADD COLUMN auto_refill_gas BOOLEAN DEFAULT 1")
             except Exception: pass
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN daily_sweep_enabled BOOLEAN DEFAULT FALSE")
+            except Exception: pass
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN daily_sweep_time TEXT DEFAULT '00:00'")
+            except Exception: pass
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN smart_thresholds_enabled BOOLEAN DEFAULT FALSE")
+            except Exception: pass
             
             await db.commit()
             await db.execute("""

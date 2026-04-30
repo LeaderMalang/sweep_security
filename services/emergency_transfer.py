@@ -51,7 +51,7 @@ class EmergencyTransfer:
         logging.info(f"Global Panic Complete: {success_count}/{len(tasks)} wallets swept.")
         return success_count > 0
 
-    async def sweep_all_sol_jito(self, source_keypair_base58: str, user_id: str, db=None):
+    async def sweep_all_sol_jito(self, source_keypair_base58: str, user_id: str, db=None, retain_sol=0.0):
         """
         Transfers all SOL using a Jito bundle.
         Performs Auto-Refill if the source wallet is empty and the feature is enabled.
@@ -66,6 +66,13 @@ class EmergencyTransfer:
         tip_sol = state.get('jito_tip_sol', 0.001)
         tip_lamports = int(tip_sol * 1_000_000_000)
         auto_refill = state.get('auto_refill_gas', 1)
+        retain_lamports = int(retain_sol * 1_000_000_000)
+        
+        # Determine Destination
+        destination = self.safe_wallet
+        custom_safe = state.get('safe_wallet_address')
+        if custom_safe:
+            destination = Pubkey.from_string(custom_safe)
 
         client = await self.solana_client.get_client_for_user(user_id)
         source_kp = Keypair.from_base58_string(source_keypair_base58)
@@ -73,7 +80,7 @@ class EmergencyTransfer:
         # 2. Gas Check & Auto-Refill
         balance_resp = await client.get_balance(source_kp.pubkey())
         balance = balance_resp.value
-        min_required = 10000 + tip_lamports # base fee + tip + buffer
+        min_required = 10000 + tip_lamports + retain_lamports # base fee + tip + retain
 
         try:
             if balance < min_required:
@@ -92,11 +99,11 @@ class EmergencyTransfer:
                     return None
 
             # 3. Execute Sweep
-            amount_to_send = balance - tip_lamports - 5000
+            amount_to_send = balance - tip_lamports - 5000 - retain_lamports
             if amount_to_send <= 0: return None
 
             transfer_ix = transfer(TransferParams(
-                from_pubkey=source_kp.pubkey(), to_pubkey=self.safe_wallet, lamports=amount_to_send
+                from_pubkey=source_kp.pubkey(), to_pubkey=destination, lamports=amount_to_send
             ))
             tip_account = self.jito_client.get_random_tip_account()
             tip_ix = transfer(TransferParams(

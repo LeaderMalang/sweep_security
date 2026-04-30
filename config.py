@@ -4,8 +4,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Solana Configuration
-SOLANA_RPC_URL = os.getenv("SOLANA_RPC_URL", "https://api.devnet.solana.com")
-SOLANA_WSS_URL = os.getenv("SOLANA_WSS_URL", "wss://api.devnet.solana.com")
+rpc_env = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+SOLANA_RPC_URLS = [url.strip() for url in rpc_env.split(",") if url.strip()]
+SOLANA_WSS_URL = os.getenv("SOLANA_WSS_URL", "wss://api.mainnet-beta.solana.com")
 
 # EVM Configuration (Ethereum, BSC, Base)
 EVM_RPC_URLS = {
