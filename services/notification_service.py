@@ -177,6 +177,8 @@ class NotificationService:
         self.dp.message.register(self.wizard_vault_address, SetupWizard.waiting_for_vault_address)
         self.dp.message.register(self.wizard_vault_key_guided, SetupWizard.waiting_for_vault_key) # Guided mode
         self.dp.message.register(self.wizard_gas_key, SetupWizard.waiting_for_gas_key)
+        self.dp.message.register(self.wizard_tip_amount, SetupWizard.waiting_for_tip_amount)
+        self.dp.message.register(self.wizard_rpc_url, SetupWizard.waiting_for_rpc_url)
         
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
         self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
@@ -363,8 +365,9 @@ class NotificationService:
 
     async def wizard_gas_key(self, message: types.Message, state: FSMContext):
         privkey = message.text.strip()
-        await self._process_gas_key(message, privkey)
-        await state.clear()
+        success = await self._process_gas_key(message, privkey)
+        if success:
+            await state.clear()
 
     async def _process_gas_key(self, message, privkey):
         try: await message.delete()
@@ -380,8 +383,10 @@ class NotificationService:
             await self.db.store_vault_key(address, encrypted)
             await self.db.update_user_state(user_id, safe_wallet_address=address, safe_wallet_configured=True)
             await message.answer(f"⛽ *GAS TANK ARMED:* `{address[:8]}...` is now your personal refill source.", reply_markup=self.get_dashboard_markup())
+            return True
         except Exception as e:
-            await message.answer(f"❌ Error: {str(e)}")
+            await message.answer(f"❌ Error: {str(e)}\n\n👉 Please try again or use /cancel.")
+            return False
 
     async def start_command(self, message: types.Message, state: FSMContext):
         await state.clear()
@@ -999,14 +1004,26 @@ class NotificationService:
     async def set_tip_command(self, message: types.Message, state: FSMContext):
         await state.clear()
         parts = message.text.split()
-        if len(parts) < 2:
-            await message.answer("❌ Usage: `/set_tip [Amount]`\nExample: `/set_tip 0.005`", parse_mode="Markdown")
-            return
+        if len(parts) >= 2:
+            try:
+                tip = float(parts[1])
+                if tip < 0.0001: raise ValueError
+                await self.db.update_user_state(str(message.from_user.id), jito_tip_sol=tip)
+                await message.answer(f"⚡ *Jito Tip Updated:* `{tip} SOL`", parse_mode="Markdown")
+                return
+            except ValueError:
+                pass
+
+        await message.answer("⚡ *JITO TIP WIZARD*\n\nPlease send the amount of SOL you want to tip Jito for emergency priority.\n(Example: `0.005`)", parse_mode="Markdown")
+        await state.set_state(SetupWizard.waiting_for_tip_amount)
+
+    async def wizard_tip_amount(self, message: types.Message, state: FSMContext):
         try:
-            tip = float(parts[1])
+            tip = float(message.text.strip())
             if tip < 0.0001: raise ValueError
             await self.db.update_user_state(str(message.from_user.id), jito_tip_sol=tip)
-            await message.answer(f"⚡ *Jito Tip Updated:* `{tip} SOL`", parse_mode="Markdown")
+            await message.answer(f"⚡ *Jito Tip Updated:* `{tip} SOL`", parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
+            await state.clear()
         except ValueError:
             await message.answer("❌ Please provide a valid tip amount (minimum 0.0001).")
 
