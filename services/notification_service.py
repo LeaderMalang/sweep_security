@@ -20,6 +20,7 @@ class SetupWizard(StatesGroup):
     waiting_for_tip_amount = State()
     waiting_for_rpc_url = State()
     waiting_for_bait_addresses = State()
+    waiting_for_schedule_time = State()
 
 class NotificationService:
     def __init__(self, db=None, emergency_service=None):
@@ -140,11 +141,93 @@ class NotificationService:
         if state: await state.clear()
         user_id = user_id_override or str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
-        if not row: return
+        if not row:
+            await message.answer("⚠️ No profile found. Run /start to initialize.")
+            return
         s = dict(row)
+        is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
+        tier = "ADMIN" if is_admin else s.get('subscription_tier', 'FREE').upper()
+
+        # Wallet data
         mon = json.loads(s.get('monitored_wallets_json') or '[]')
-        status_text = f"🛡️ *Report*\nSafe: `{s.get('safe_wallet_address')[:8]}...`\nDefense: {'ON' if s.get('auto_defense') else 'OFF'}\nMonitoring: {len(mon)} Wallets"
-        await message.answer(status_text, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
+        baits = json.loads(s.get('bait_wallets_json') or '[]')
+        safe_addr = s.get('safe_wallet_address') or 'Not Set'
+        safe_short = f"`{safe_addr[:6]}...{safe_addr[-4:]}`" if len(safe_addr) > 10 else f"`{safe_addr}`"
+
+        # Fetch gas balance from Safe Wallet
+        gas_bal = 0.0
+        if safe_addr and safe_addr != 'Not Set':
+            try:
+                if self.emergency_service and self.emergency_service.solana_client:
+                    gas_bal = await self.emergency_service.solana_client.get_balance(safe_addr, user_id)
+            except Exception: pass
+
+        rpc_usage = s.get('rpc_usage_count', 0)
+        defense = '✅ ON' if s.get('auto_defense') else '❌ OFF'
+        skimming = '✅ ON' if s.get('skimming_enabled') else '❌ OFF'
+        auto_refill = '✅ ON' if s.get('auto_refill_gas', True) else '❌ OFF'
+        daily = '✅ ON' if s.get('daily_sweep_enabled') else '❌ OFF'
+        smart = '✅ ON' if s.get('smart_thresholds_enabled') else '❌ OFF'
+        custom_rpc = s.get('custom_rpc_url') or 'Public Mainnet'
+
+        # Build header
+        lines = [
+            "🛡️ *Guardian Security Report*",
+            "━━━━━━━━━━━━━━━━━━━━",
+            f"👤 Tier: *{tier}*",
+            f"🏦 Safe: {safe_short}",
+            f"⛽ Gas: `{gas_bal:.6f} SOL`",
+            f"🛡️ Defense: {defense}",
+            f"🍯 Bait Network: {skimming}",
+            f"🔄 Auto-Refill: {auto_refill}",
+            f"🧠 Smart Mode: {smart}",
+            f"🕰️ Daily Harvest: {daily}",
+            f"📡 Requests: `{rpc_usage}`",
+            f"🌐 RPC: `{custom_rpc[:30]}{'...' if len(custom_rpc) > 30 else ''}`",
+            "━━━━━━━━━━━━━━━━━━━━",
+        ]
+
+        # Monitoring wallets
+        lines.append(f"👀 *Monitoring: {len(mon)} Wallets*")
+        if mon:
+            for addr in mon:
+                bal = 0.0
+                try:
+                    if self.emergency_service and self.emergency_service.solana_client:
+                        bal = await self.emergency_service.solana_client.get_balance(addr, user_id)
+                except Exception: pass
+                lines.append(f"  • `{addr[:8]}...`: `{bal:.3f} SOL`")
+        else:
+            lines.append("  _No wallets monitored yet._")
+
+        lines.append("━━━━━━━━━━━━━━━━━━━━")
+
+        # Honey pot / bait wallets
+        lines.append(f"🍯 *Honey Pot Network: {len(baits)} Wallets*")
+        if baits:
+            for addr in baits:
+                bal = 0.0
+                try:
+                    if self.emergency_service and self.emergency_service.solana_client:
+                        bal = await self.emergency_service.solana_client.get_balance(addr, user_id)
+                except Exception: pass
+                lines.append(f"  • `{addr[:8]}...`: `{bal:.3f} SOL`")
+        else:
+            lines.append("  _No bait wallets configured. Use /add_bait_")
+
+        status_text = "\n".join(lines)
+
+        # Build rich inline keyboard
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            types.InlineKeyboardButton(text="📊 Refresh", callback_data="status_refresh"),
+            types.InlineKeyboardButton(text="⚙️ Settings", callback_data="settings_menu")
+        )
+        builder.row(
+            types.InlineKeyboardButton(text="📅 Schedule Report", callback_data="schedule_report"),
+            types.InlineKeyboardButton(text="🔄 Auto-Transfer: " + ("ON" if s.get('auto_defense') else "OFF"), callback_data="toggle_auto")
+        )
+        await message.answer(status_text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
     async def wallets_command(self, message: types.Message, state: FSMContext = None):
         if state: await state.clear()
@@ -342,6 +425,92 @@ class NotificationService:
         await state.clear()
         await message.answer("❌ Cancelled")
 
+    # ─── Critical Public API Methods (called by other services) ────────────────
+
+    async def send_threat_alert(self, wallet_address: str, score: int, reasons: list, tx_hash: str = None):
+        """Called by WalletMonitor, HoneyPotManager, EVMMonitor to push threat alerts."""
+        threat_text = (
+            f"🚨 *THREAT DETECTED*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+            f"📍 Wallet: `{wallet_address[:12]}...` \n"
+            f"🔥 Risk Score: *{score}/100*\n"
+            f"━━━━━━━━━━━━━━━━━━━━\n"
+        )
+        for r in reasons:
+            threat_text += f"  • {r}\n"
+        if tx_hash:
+            threat_text += f"\n🔗 TX: `{str(tx_hash)[:32]}...`"
+
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            types.InlineKeyboardButton(text="🚀 PANIC SWEEP", callback_data="sweep_all"),
+            types.InlineKeyboardButton(text="✅ Dismiss", callback_data="ignore")
+        )
+        try:
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=threat_text,
+                parse_mode="Markdown",
+                reply_markup=builder.as_markup()
+            )
+        except Exception as e:
+            logging.error(f"send_threat_alert failed: {e}")
+
+    async def send_status_update(self, text: str):
+        """Called by HygieneManager, MempoolWatcher etc. to push plain status messages."""
+        try:
+            await self.bot.send_message(
+                chat_id=self.chat_id,
+                text=text,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logging.error(f"send_status_update failed: {e}")
+
+    async def handle_ignore(self, callback: types.CallbackQuery):
+        """Dismisses an alert message."""
+        try:
+            await callback.message.edit_text("✅ Alert dismissed.")
+        except Exception:
+            pass
+        await callback.answer()
+
+    async def schedule_report_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer(
+            "📅 *SCHEDULE REPORT*\n\n"
+            "Send the time you want your daily security report (24h format).\n"
+            "Example: `08:00` for 8am, `21:30` for 9:30pm",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_schedule_time)
+
+    async def wizard_schedule_time(self, message: types.Message, state: FSMContext):
+        import re
+        time_str = message.text.strip()
+        if re.match(r'^([01]\d|2[0-3]):[0-5]\d$', time_str):
+            await self.db.update_user_state(
+                str(message.from_user.id),
+                daily_sweep_enabled=True,
+                daily_sweep_time=time_str
+            )
+            await message.answer(
+                f"✅ *Daily Report Scheduled!*\n"
+                f"You will receive a security report at *{time_str}* every day.",
+                parse_mode="Markdown"
+            )
+            await state.clear()
+        else:
+            await message.answer("❌ Invalid format. Please send time as HH:MM (e.g. `08:00`).", parse_mode="Markdown")
+
+    async def handle_schedule_report_callback(self, callback: types.CallbackQuery, state: FSMContext):
+        await callback.message.answer(
+            "📅 *SCHEDULE REPORT*\n\nSend the time for your daily report (HH:MM).",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_schedule_time)
+        await callback.answer()
+
     async def handle_toggle_auto_wizard(self, callback: types.CallbackQuery):
         user_id = str(callback.from_user.id)
         action = callback.data.split("_")[-1]  # "yes" or "no"
@@ -395,14 +564,35 @@ class NotificationService:
     async def start(self):
         from aiogram.types import BotCommand
         await self.bot.set_my_commands([
-            BotCommand(command="start", description="Dashboard"),
-            BotCommand(command="status", description="Stats"),
-            BotCommand(command="panic", description="🚨 PANIC"),
-            BotCommand(command="settings", description="Settings"),
-            BotCommand(command="vault", description="Vault"),
-            BotCommand(command="unlock", description="Unlock"),
-            BotCommand(command="reset_state", description="Reset"),
-            BotCommand(command="cancel", description="Cancel"),
+            # Core
+            BotCommand(command="start", description="🛡️ Dashboard & Setup Wizard"),
+            BotCommand(command="status", description="📊 Full Security Report"),
+            BotCommand(command="panic", description="🚨 Emergency Sweep ALL assets"),
+            BotCommand(command="vault", description="🔐 Encrypt & store a private key"),
+            BotCommand(command="settings", description="⚙️ Toggle Defense, Skim, Refill"),
+            BotCommand(command="unlock", description="🔓 Unlock vault session"),
+            BotCommand(command="setup_nonce", description="⚡ Setup durable nonce account"),
+            # Tactical
+            BotCommand(command="set_tip", description="⚡ Set Jito priority tip (SOL)"),
+            BotCommand(command="set_rpc", description="📡 Link private RPC URL"),
+            BotCommand(command="set_safe", description="🏦 Update Safe Wallet address"),
+            BotCommand(command="set_gas_key", description="⛽ Link Gas Tank private key"),
+            BotCommand(command="add_monitored", description="👀 Add wallet to watch-list"),
+            BotCommand(command="add_bait", description="🍯 Add a Honey Pot bait wallet"),
+            BotCommand(command="remove_wallet", description="🗑️ Remove wallet from fleet"),
+            BotCommand(command="skim", description="🍯 Configure auto-skimming harvest"),
+            BotCommand(command="set_daily_sweep", description="🕰️ Schedule daily harvest time"),
+            BotCommand(command="schedule_report", description="📅 Schedule daily security report"),
+            BotCommand(command="toggle_smart", description="🧠 Toggle smart threshold mode"),
+            # Info & Recovery
+            BotCommand(command="wallets", description="📋 List monitored wallet fleet"),
+            BotCommand(command="health", description="🟢 System health check"),
+            BotCommand(command="history", description="📜 Threat history log"),
+            BotCommand(command="premium", description="💎 Subscription tiers"),
+            BotCommand(command="recommend", description="🏆 Recommended settings"),
+            BotCommand(command="faq", description="❓ Frequently asked questions"),
+            BotCommand(command="reset_state", description="⚠️ Reset all wallet data"),
+            BotCommand(command="cancel", description="❌ Cancel current wizard"),
         ])
         await self.dp.start_polling(self.bot)
 
@@ -470,6 +660,7 @@ class NotificationService:
         self.dp.message.register(self.reset_state_command, Command("reset_state"))
         self.dp.message.register(self.report_command, Command("report"))
         self.dp.message.register(self.test_attack_command, Command("test_attack"))
+        self.dp.message.register(self.schedule_report_command, Command("schedule_report"))
 
         self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
         self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
@@ -483,11 +674,14 @@ class NotificationService:
         self.dp.message.register(self.wizard_gas_key, SetupWizard.waiting_for_gas_key)
         self.dp.message.register(self.wizard_tip_amount, SetupWizard.waiting_for_tip_amount)
         self.dp.message.register(self.wizard_rpc_url, SetupWizard.waiting_for_rpc_url)
-        
+        self.dp.message.register(self.wizard_schedule_time, SetupWizard.waiting_for_schedule_time)
+
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
         self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
         self.dp.callback_query.register(self.handle_toggle_daily, F.data == "toggle_daily")
         self.dp.callback_query.register(self.handle_toggle_smart, F.data == "toggle_smart")
         self.dp.callback_query.register(self.handle_toggle_refill, F.data == "toggle_refill")
         self.dp.callback_query.register(self.handle_toggle_skimming, F.data == "toggle_skimming")
+        self.dp.callback_query.register(self.handle_ignore, F.data == "ignore")
+        self.dp.callback_query.register(self.handle_schedule_report_callback, F.data == "schedule_report")
 
