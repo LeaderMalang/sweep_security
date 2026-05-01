@@ -174,11 +174,11 @@ class EmergencyTransfer:
                 if encrypted_key:
                     from utils.encryption_utils import EncryptionManager
                     encryptor = EncryptionManager(config.ENCRYPTION_KEY)
-                    privkey = encryptor.decrypt(encrypted_key)
+                    privkey = encryptor.decrypt(encrypted_key).strip()
 
             # 2. Fallback to System Global Key
             if not privkey:
-                privkey = config.SAFE_WALLET_PRIVATE_KEY
+                privkey = config.SAFE_WALLET_PRIVATE_KEY.strip()
             
             if not privkey:
                 logging.error("No gas source (user or global) available for refill.")
@@ -191,11 +191,11 @@ class EmergencyTransfer:
                 logging.error(f"❌ GAS TANK EMPTY: {safe_kp.pubkey()} only has {balance} SOL. Please fund it for Auto-Refill.")
                 return False
 
-            # Inject 0.005 SOL (enough for multiple rescue attempts)
+            # Inject 0.007 SOL (enough for high-priority tips + fees)
             refill_ix = transfer(TransferParams(
                 from_pubkey=safe_kp.pubkey(),
                 to_pubkey=target_pubkey,
-                lamports=5_000_000 
+                lamports=7_000_000 
             ))
             recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
             if not recent_blockhash: return False
@@ -205,8 +205,10 @@ class EmergencyTransfer:
                 safe_kp.pubkey(),
                 recent_blockhash
             )
+            logging.info(f"⛽ [Refill] Creating transaction for {target_pubkey}...")
             tx = Transaction([safe_kp], msg, recent_blockhash)
             
+            logging.info(f"⛽ [Refill] Broadcasting injection...")
             res = await self.solana_client.send_raw_transaction(bytes(tx), user_id)
             logging.info(f"⛽ Gas Injected for user {user_id}: {res}")
             return True
