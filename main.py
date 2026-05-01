@@ -61,6 +61,7 @@ async def main():
     # 5. Initialize Response Engine
     emergency_service = EmergencyTransfer(solana_client, jito_client=jito_client, db=db)
     notification_service.emergency_service = emergency_service
+    emergency_service.notification_service = notification_service
     wallet_monitor = WalletMonitor(threat_detector, notification_service, db, emergency_service)
     evm_monitor = EVMMonitor(threat_detector, notification_service)
     honey_pot_manager = HoneyPotManager(db=db, threat_detector=threat_detector, emergency_service=emergency_service)

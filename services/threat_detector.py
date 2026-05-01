@@ -29,8 +29,8 @@ class ThreatDetector:
         # 1. Dust Detection
         threshold = self.dust_threshold_sol if network == 'solana' else self.dust_threshold_eth
         if 0 < amount < threshold:
-            score += 40
-            reasons.append(f"Low amount (Dust): {amount} {network.upper()}")
+            score += 95 # Treat as high risk probe
+            reasons.append(f"🚨 DUSTING PROBE DETECTED: {amount} {network.upper()}")
 
         # 2. Blacklist Check
         if sender.lower() in [a.lower() for a in self.blacklist]:

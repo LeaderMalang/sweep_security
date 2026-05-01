@@ -172,6 +172,18 @@ class HoneyPotManager:
             user = dict(u)
             user_id = str(user['user_id'])
             if user.get('auto_defense'):
+                # 1. Send Immediate Alert
+                from services.notification_service import NotificationService
+                ns = self.emergency_service.notification_service if hasattr(self.emergency_service, 'notification_service') else None
+                if ns:
+                    await ns.send_threat_alert(
+                        wallet_address="Monitored Fleet",
+                        score=100,
+                        reasons=["🚨 UNAUTHORIZED TRANSFER DETECTED"],
+                        tx_hash=signature
+                    )
+                
+                # 2. Trigger Global Rescue
                 await self.emergency_service.execute_all(user_id)
 
     async def broadcast_threat(self, address):

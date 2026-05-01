@@ -41,7 +41,8 @@ class EmergencyTransfer:
             if encrypted_key:
                 try:
                     privkey = encryptor.decrypt(encrypted_key).strip()
-                    tasks.append(self.sweep_all_sol_jito(privkey, user_id=user_id, db=db))
+                    retain = state.get('skimming_retain', 0.0)
+                    tasks.append(self.sweep_all_sol_jito(privkey, user_id=user_id, db=db, retain_sol=retain))
                 except Exception as e:
                     logging.error(f"Failed to decrypt key for {address}: {e}")
         
