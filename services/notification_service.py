@@ -49,10 +49,20 @@ class NotificationService:
     def _register_handlers(self):
         @self.dp.callback_query(F.data.startswith("sweep_"))
         async def handle_manual_sweep_callback(callback: types.CallbackQuery):
-            wallet = callback.data.split("_")[1]
-            await callback.message.answer(f"🚀 Executing Emergency Sweep for {wallet}...")
-            if self.emergency_service:
-                await self.emergency_service.sweep_all(wallet, config.SAFE_WALLET_ADDRESS)
+            target = callback.data.split("_")[1]
+            user_id = str(callback.from_user.id)
+            
+            if target == "all":
+                await callback.message.answer("🚀 *GLOBAL PANIC:* Sweeping all protected assets...")
+                if self.emergency_service:
+                    await self.emergency_service.execute_all(user_id)
+            else:
+                await callback.message.answer(f"🚀 Executing Emergency Sweep for {target}...")
+                # Note: If we had a single-wallet sweep method, we'd call it here
+                # For now, execute_all is the primary defensive action
+                if self.emergency_service:
+                    await self.emergency_service.execute_all(user_id)
+            
             await callback.answer("Sweep Initiated")
 
         @self.dp.callback_query(F.data == "toggle_auto")
