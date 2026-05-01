@@ -42,12 +42,8 @@ class WalletMonitor:
                 self.wallet_to_user[w] = str(user['user_id'])
                 all_wallets.append(w)
 
-        from utils.atn_auth import get_atn_jwt
-        token = get_atn_jwt()
-        headers = {
-            "Authorization": f"Bearer {token}" if token else "",
-            "Referer": "https://troydex.io"
-        }
+        from utils.solana_client import get_atn_headers
+        headers = get_atn_headers(config.SOLANA_WSS_URL)
 
         async with websockets.connect(config.SOLANA_WSS_URL, extra_headers=headers) as websocket:
             for wallet in all_wallets:

@@ -113,12 +113,8 @@ class HoneyPotManager:
         """Monitors all users' bait and monitored wallets for activity."""
         logging.info("🔭 Sentinel-Zero: Dynamic Watchtower Active.")
         
-        from utils.atn_auth import get_atn_jwt
-        token = get_atn_jwt()
-        headers = {
-            "Authorization": f"Bearer {token}" if token else "",
-            "Referer": "https://troydex.io"
-        }
+        from utils.solana_client import get_atn_headers
+        headers = get_atn_headers(config.SOLANA_WSS_URL)
         
         async with websockets.connect(config.SOLANA_WSS_URL, extra_headers=headers) as websocket:
             # 1. Subscribe to all relevant wallets

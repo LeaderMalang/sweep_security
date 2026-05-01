@@ -6,13 +6,10 @@ from solders.pubkey import Pubkey
 from utils.atn_auth import get_atn_jwt
 
 def get_atn_headers(url: str = ""):
+    token = get_atn_jwt()
     headers = {"Referer": "https://troydex.io"}
-    # Only send JWT if it's not a permanent API key link (hex at the end)
-    # Permanent links usually don't want the Bearer token or it conflicts
-    if "/json_rpc/" not in url:
-        token = get_atn_jwt()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     return headers
 
 class SolanaConnectionPool:
