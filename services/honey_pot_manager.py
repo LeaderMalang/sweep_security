@@ -84,11 +84,13 @@ class HoneyPotManager:
                     logging.info(f"🧠 SMART MODE: Active threshold {threshold} for User {user_id}")
 
                     retain = user['skimming_retain']
-                    bait_wallets = json.loads(user.get('bait_wallets_json', '[]'))
+                    bait_wallets = json.loads(user.get('bait_wallets_json', '[]') or '[]')
+                    monitored_wallets = json.loads(user.get('monitored_wallets_json', '[]') or '[]')
+                    all_harvest_wallets = list(set(bait_wallets + monitored_wallets))
                     
-                    if not bait_wallets: continue
+                    if not all_harvest_wallets: continue
 
-                    for wallet in bait_wallets:
+                    for wallet in all_harvest_wallets:
                         # Get balance using user's specific RPC
                         balance = await self.solana_client.get_balance(wallet, user_id=user_id)
                         
