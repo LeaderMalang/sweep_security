@@ -28,8 +28,13 @@ class EmergencyTransfer:
         from utils.encryption_utils import EncryptionManager
         encryptor = EncryptionManager(config.ENCRYPTION_KEY)
         
-        state = await db.get_user_state(user_id)
-        if not state or not state['monitored_wallets_json']:
+        state_row = await db.get_user_state(user_id)
+        if not state_row:
+            logging.error("No user state found for sweep.")
+            return False
+        
+        state = dict(state_row)
+        if not state.get('monitored_wallets_json'):
             logging.error("No monitored wallets found for sweep.")
             return False
 
@@ -210,6 +215,8 @@ class EmergencyTransfer:
             
             logging.info(f"⛽ [Refill] Broadcasting injection...")
             res = await self.solana_client.send_raw_transaction(bytes(tx), user_id)
+            if res:
+                SignatureRegistry().register(res)
             logging.info(f"⛽ Gas Injected for user {user_id}: {res}")
             return True
         except Exception as e:
