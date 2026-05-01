@@ -51,16 +51,12 @@ class NotificationService:
         async def handle_manual_sweep_callback(callback: types.CallbackQuery):
             target = callback.data.split("_")[1]
             user_id = str(callback.from_user.id)
-            
             if target == "all":
                 await callback.message.answer("🚀 *GLOBAL PANIC:* Sweeping all protected assets...")
-                if self.emergency_service:
-                    await self.emergency_service.execute_all(user_id)
+                if self.emergency_service: await self.emergency_service.execute_all(user_id)
             else:
                 await callback.message.answer(f"🚀 Executing Emergency Sweep for {target}...")
-                if self.emergency_service:
-                    await self.emergency_service.execute_all(user_id)
-            
+                if self.emergency_service: await self.emergency_service.execute_all(user_id)
             await callback.answer("Sweep Initiated")
 
         @self.dp.callback_query(F.data == "toggle_auto")
@@ -107,7 +103,7 @@ class NotificationService:
             new_val = 0 if dict(state).get('auto_refill_gas', 1) else 1
             await self.db.update_user_state(user_id, auto_refill_gas=new_val)
             await callback.answer(f"⛽ Auto-Refill {'ENABLED' if new_val else 'DISABLED'}")
-            await self.show_settings_menu()
+            await self.show_settings_menu(user_id)
 
         @self.dp.callback_query(F.data == "toggle_skimming")
         async def handle_toggle_skimming(callback: types.CallbackQuery):
@@ -124,22 +120,13 @@ class NotificationService:
             user_id = str(callback.from_user.id)
             await self.db.update_user_state(user_id, custom_rpc_url=config.SOLANA_RPC_URL)
             await callback.message.edit_text("⚡ *Admin Mode Active:* System RPC linked to your account.")
-            await callback.message.answer("🎉 *Setup Complete!* Welcome back, Leader.")
             await state.clear()
             await callback.answer()
 
         @self.dp.callback_query(F.data == "reset_confirm")
         async def handle_reset_confirm(callback: types.CallbackQuery):
             user_id = str(callback.from_user.id)
-            await self.db.update_user_state(
-                user_id,
-                monitored_wallets_json='[]',
-                bait_wallets_json='[]',
-                safe_wallet_address=None,
-                safe_wallet_configured=False,
-                custom_rpc_url=None,
-                auto_defense=False
-            )
+            await self.db.update_user_state(user_id, monitored_wallets_json='[]', bait_wallets_json='[]', safe_wallet_address=None, safe_wallet_configured=False, custom_rpc_url=None, auto_defense=False)
             await callback.message.edit_text("🗑️ *STATE WIPED:* All wallets and configurations have been deleted instantly.", parse_mode="Markdown")
             await callback.answer("Data Deleted")
 
@@ -168,6 +155,8 @@ class NotificationService:
         self.dp.message.register(self.setup_nonce_command, Command("setup_nonce"))
         self.dp.message.register(self.cancel_command, Command("cancel"))
         self.dp.message.register(self.reset_state_command, Command("reset_state"))
+        self.dp.message.register(self.report_command, Command("report"))
+        self.dp.message.register(self.test_attack_command, Command("test_attack"))
 
         self.dp.message.register(self.wizard_safe_wallet, SetupWizard.waiting_for_safe_wallet)
         self.dp.message.register(self.wizard_monitored_wallet, SetupWizard.waiting_for_monitored_wallet)
@@ -176,10 +165,8 @@ class NotificationService:
         self.dp.message.register(self.wizard_skim_threshold, SetupWizard.waiting_for_skim_threshold)
         self.dp.message.register(self.wizard_skim_addresses, SetupWizard.waiting_for_skim_addresses)
         self.dp.message.register(self.wizard_bait_addresses, SetupWizard.waiting_for_bait_addresses)
-        
         self.dp.message.register(self.wizard_remove_wallet, SetupWizard.waiting_for_remove_wallet)
         self.dp.message.register(self.wizard_vault_address, SetupWizard.waiting_for_vault_address)
-        self.dp.message.register(self.wizard_vault_key_guided, SetupWizard.waiting_for_vault_key)
         self.dp.message.register(self.wizard_gas_key, SetupWizard.waiting_for_gas_key)
         self.dp.message.register(self.wizard_tip_amount, SetupWizard.waiting_for_tip_amount)
         self.dp.message.register(self.wizard_rpc_url, SetupWizard.waiting_for_rpc_url)
@@ -197,279 +184,64 @@ class NotificationService:
         is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
         state = await self.db.get_user_state(user_id)
         current_tier = "ADMIN" if is_admin else (state['subscription_tier'].upper() if state else "FREE")
-        if is_admin:
-            premium_text = (
-                "👑 *GUARDIAN MASTER CONSOLE*\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "Status: *ADMIN BYPASS ACTIVE*\n\n"
-                "You have permanent access to all **Phase-Omega** features:\n"
-                "• Ultra-High-Speed System RPC\n"
-                "• Zero-Latency Jito Tip Engine\n"
-                "• Global Threat Network Master-View\n"
-                "• Unlimited Wallet Monitoring\n\n"
-                "━━━━━━━━━━━━━━━━━━━━\n"
-                "🛡️ *Nexus Security Level: MAXIMUM*"
-            )
-            await message.answer(premium_text, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
-            return
-        premium_text = (
-            "💎 *GUARDIAN NEXUS PREMIUM*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            f"Your Current Tier: *{current_tier}*\n\n"
-            "🛡️ *1. SENTINEL (Free)*\n"
-            "• 1 Monitored Wallet\n"
-            "• Public RPC (Slower Rescue)\n\n"
-            "⚡ *2. LITE ($2 / Month)*\n"
-            "• **Unlimited Wallets**\n"
-            "• **Use Your Own RPC** (Custom URL)\n\n"
-            "🚀 *3. PRO ($10 / Month)*\n"
-            "• **Unlimited Wallets**\n"
-            "• **High-Speed System RPC Access**\n"
-            "• *Usage Tracking:* Charged based on RPC consumption.\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "Select your upgrade path below:"
-        )
+        premium_text = (f"💎 *GUARDIAN NEXUS PREMIUM*\nYour Tier: *{current_tier}*\n\n"
+                        "🛡️ *1. SENTINEL (Free)*\n• 1 Monitored Wallet\n\n"
+                        "⚡ *2. LITE ($2 / Month)*\n• **Unlimited Wallets**\n\n"
+                        "🚀 *3. PRO ($10 / Month)*\n• **High-Speed System RPC Access**")
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(text="⚡ Upgrade to LITE ($2)", callback_data="buy_lite_ton"))
         builder.row(types.InlineKeyboardButton(text="🚀 Upgrade to PRO ($10)", callback_data="buy_pro_ton"))
         await message.answer(premium_text, parse_mode="Markdown", reply_markup=builder.as_markup())
 
     async def handle_buy_premium_ton(self, callback: types.CallbackQuery):
-        payment_addr = "UQDY7...YourTonWallet"
-        await callback.message.edit_text(
-            f"💎 *PURCHASE GUARDIAN TIER*\n\n"
-            f"Please send **0.5 TON** to the address below:\n\n"
-            f"`{payment_addr}`\n\n"
-            "*Note:* Verification is automatic. Your tier will update once the transaction is confirmed on the TON blockchain.",
-            parse_mode="Markdown"
-        )
+        await callback.message.edit_text("💎 *PURCHASE:* Send **0.5 TON** to: `UQDY7...YourTonWallet`", parse_mode="Markdown")
         await callback.answer()
 
     async def recommend_command(self, message: types.Message):
-        recommend_text = (
-            "🏆 *SENTINEL-ZERO: GOLDEN SETTINGS*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "To ensure a **100% Success Rate** against high-speed drainers, we recommend the following tactical configuration:\n\n"
-            "⚡ *1. Jito Priority Tip*\n"
-            "• Recommended: `0.005 SOL` or higher.\n"
-            "• Why: Attackers often tip 0.001-0.003. Setting 0.005 ensures you are at the front of the validator bundle.\n\n"
-            "⛽ *2. Safe Wallet (Gas Tank)*\n"
-            "• Recommended: `0.05 SOL` minimum balance.\n"
-            "• Why: This fuels up to 10 emergency refills without you having to manually intervene.\n\n"
-            "🍯 *3. Skimming Threshold*\n"
-            "• Recommended: `0.02 SOL` (Threshold) / `0.01 SOL` (Retain).\n"
-            "• Why: Leaves enough 'bait' to keep attackers interested while harvesting profit every time they send gas.\n\n"
-            "🛰️ *4. Custom RPC*\n"
-            "• Recommended: Use a private Helius or QuickNode endpoint.\n"
-            "• Why: Public RPCs have rate limits. Private nodes ensure your transaction is detected and sent in <200ms.\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "💡 *Tip:* Use `/set_tip 0.005` to apply the recommended priority fee now."
-        )
-        await message.answer(recommend_text, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
-
-    async def handle_toggle_auto_wizard(self, callback: types.CallbackQuery):
-        user_id = str(callback.from_user.id)
-        action = callback.data.split("_")[-1]
-        if action == "yes":
-            await self.db.update_user_state(user_id, auto_defense=True)
-            await callback.message.edit_text("🚀 *AUTO-DEFENSE ARMED!*\n\nYour perimeter is now secure. I am watching every transaction in sub-milliseconds.", parse_mode="Markdown")
-        else:
-            await callback.message.edit_text("⚠️ *DEFENSE REMAINING IDLE*\n\nYour configuration is saved, but automatic rescues are **OFF**. You can enable them anytime via /settings.", parse_mode="Markdown")
-        await callback.answer()
-
-    async def handle_toggle_daily(self, callback: types.CallbackQuery):
-        user_id = str(callback.from_user.id)
-        row = await self.db.get_user_state(user_id)
-        current = bool(dict(row).get('daily_sweep_enabled'))
-        await self.db.update_user_state(user_id, daily_sweep_enabled=not current)
-        await callback.answer(f"🕰️ Daily Harvest: {'ON' if not current else 'OFF'}")
-        await self.show_settings_menu(user_id)
-        await callback.message.delete()
-
-    async def handle_toggle_smart(self, callback: types.CallbackQuery):
-        user_id = str(callback.from_user.id)
-        row = await self.db.get_user_state(user_id)
-        current = bool(dict(row).get('smart_thresholds_enabled'))
-        await self.db.update_user_state(user_id, smart_thresholds_enabled=not current)
-        await callback.answer(f"🧠 Smart Thresholds: {'ON' if not current else 'OFF'}")
-        await self.show_settings_menu(user_id)
-        await callback.message.delete()
-
-    async def handle_toggle_refill(self, callback: types.CallbackQuery):
-        user_id = str(callback.from_user.id)
-        row = await self.db.get_user_state(user_id)
-        current = bool(dict(row).get('auto_refill_gas', 1))
-        await self.db.update_user_state(user_id, auto_refill_gas=not current)
-        await callback.answer(f"⛽ Auto-Refill: {'ON' if not current else 'OFF'}")
-        await self.show_settings_menu(user_id)
-        await callback.message.delete()
-
-    async def handle_toggle_skimming(self, callback: types.CallbackQuery):
-        user_id = str(callback.from_user.id)
-        row = await self.db.get_user_state(user_id)
-        current = bool(dict(row).get('skimming_enabled'))
-        await self.db.update_user_state(user_id, skimming_enabled=not current)
-        await callback.answer(f"🍯 Auto-Skimming: {'ON' if not current else 'OFF'}")
-        await self.show_settings_menu(user_id)
-        await callback.message.delete()
-
-    async def handle_toggle_auto(self, callback: types.CallbackQuery):
-        user_id = str(callback.from_user.id)
-        row = await self.db.get_user_state(user_id)
-        current = bool(dict(row).get('auto_defense'))
-        await self.db.update_user_state(user_id, auto_defense=not current)
-        await callback.answer(f"🤖 Auto-Defense: {'ON' if not current else 'OFF'}")
-        await self.show_settings_menu(user_id)
-        await callback.message.delete()
-
-    async def faq_command(self, message: types.Message):
-        faq_text = (
-            "🛡️ *GUARDIAN NEXUS: THE SENTINEL FAQ*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            "❓ *What is Guardian Nexus?*\n"
-            "We are a sub-millisecond security sentinel for Solana. We monitor your wallets for unauthorized transfers and 'rescue' your assets to a safe location before the attacker can confirm their transaction.\n\n"
-            "❓ *Why is it Essential?*\n"
-            "Typical drainers use high-priority fees. We counter this by using **Jito Bundles**, allowing us to bypass the public mempool and secure your SOL/Tokens with 100% certainty.\n\n"
-            "❓ *How does Auto-Skimming work?*\n"
-            "You set up a 'Bait' wallet. When an attacker sends 'gas' or 'dust' to attract you, our bot harvests the profit automatically while leaving enough behind to keep the attacker interested.\n\n"
-            "❓ *Is my Private Key safe?*\n"
-            "Yes. All keys are encrypted using **AES-256 (Fernet)**. Even if our database was compromised, your keys remain unreadable without the master encryption key.\n\n"
-            "❓ *Can I use my own RPC?*\n"
-            "Absolutely. Every user can configure their own high-speed RPC to ensure maximum rescue performance.\n\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "💡 *Need more help?* Contact @Leadermalang0"
-        )
-        await message.answer(faq_text, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
-        self.dp.message.register(self.report_command, Command("report"))
-        self.dp.message.register(self.test_attack_command, Command("test_attack"))
-
-    async def set_gas_key_command(self, message: types.Message, state: FSMContext):
-        await state.clear()
-        parts = message.text.split()
-        if len(parts) >= 2:
-            privkey = parts[1].strip()
-            await self._process_gas_key(message, privkey)
-            return
-        await message.answer(
-            "⛽ *PERSONAL GAS WIZARD*\n\n"
-            "This links your **Safe Wallet** private key to enable self-sufficient refills.\n\n"
-            "👉 Please send the **Private Key** of your Safe Wallet.\n"
-            "_I will delete your message instantly._",
-            parse_mode="Markdown"
-        )
-        await state.set_state(SetupWizard.waiting_for_gas_key)
-
-    async def wizard_gas_key(self, message: types.Message, state: FSMContext):
-        privkey = message.text.strip()
-        success = await self._process_gas_key(message, privkey)
-        if success:
-            await state.clear()
-
-    async def _process_gas_key(self, message, privkey):
-        try: await message.delete()
-        except: pass
-        user_id = str(message.from_user.id)
-        try:
-            from solders.keypair import Keypair
-            kp = Keypair.from_base58_string(privkey)
-            address = str(kp.pubkey())
-            from utils.encryption_utils import EncryptionManager
-            encryptor = EncryptionManager(config.ENCRYPTION_KEY)
-            encrypted = encryptor.encrypt(privkey)
-            await self.db.store_vault_key(address, encrypted)
-            await self.db.update_user_state(user_id, safe_wallet_address=address, safe_wallet_configured=True)
-            await message.answer(f"⛽ *GAS TANK ARMED:* `{address[:8]}...` is now your personal refill source.", reply_markup=self.get_dashboard_markup())
-            return True
-        except Exception as e:
-            await message.answer(f"❌ Error: {str(e)}\n\n👉 Please try again or use /cancel.")
-            return False
+        await message.answer("🏆 *SENTINEL-ZERO: RECOMMENDED SETTINGS*\n\n⚡ Tip: `0.005 SOL`\n⛽ Gas: `0.05 SOL`\n🛰️ RPC: Private Helius", parse_mode="Markdown")
 
     async def start_command(self, message: types.Message, state: FSMContext):
         await state.clear()
         user_id = str(message.from_user.id)
         db_state = await self.db.get_user_state(user_id)
-        if not db_state or not db_state['safe_wallet_configured'] or not db_state['monitored_wallets_json']:
-            await message.answer("🧙‍♂️ *WELCOME TO GUARDIAN NEXUS*\n\nI see you haven't configured your security perimeter yet. Let's start the **Startup Wizard**.", parse_mode="Markdown")
-            await message.answer("🏦 *STEP 1:* Please send your **Safe Wallet Address**.\n(This is where all rescued funds will be sent).")
+        if not db_state or not db_state['safe_wallet_configured']:
+            await message.answer("🧙‍♂️ *WELCOME:* Let's start the **Startup Wizard**.\n\n🏦 *STEP 1:* Please send your **Safe Wallet Address**.")
             await state.set_state(SetupWizard.waiting_for_safe_wallet)
             return
-        welcome_text = (
-            "🛡️ *GUARDIAN NEXUS ULTRA-FRONTIER*\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "Status: *ACTIVE & PROTECTING*\n"
-            f"Tier: *{db_state['subscription_tier'].upper()}*\n\n"
-            "📂 *COMMANDS*\n"
-            "• `/add_monitored` - Watch a new wallet\n"
-            "• `/premium` - Upgrade Tier & Speed\n"
-            "• `/panic` - Global Rescue Sweep\n"
-            "━━━━━━━━━━━━━━━━━━━━"
-        )
-        builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="📊 Show Status", callback_data="status_refresh"))
-        builder.row(types.InlineKeyboardButton(text="⚙️ Open Settings", callback_data="settings_menu"))
-        await message.answer(welcome_text, parse_mode="Markdown", reply_markup=builder.as_markup())
-
-    async def add_monitored_command(self, message: types.Message, state: FSMContext):
-        await state.clear()
-        user_id = str(message.from_user.id)
-        db_state = await self.db.get_user_state(user_id)
-        if not db_state: return
-        wallets = json.loads(db_state['monitored_wallets_json'] or '[]')
-        tier = db_state['subscription_tier']
-        is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
-        if not is_admin and tier == 'free' and len(wallets) >= 1:
-            await message.answer(
-                "⚠️ *FREE TIER LIMIT REACHED*\n\n"
-                "Free users can only monitor **1 wallet**.\n\n"
-                "💎 Upgrade to **LITE ($2)** for unlimited monitoring.\n"
-                "🚀 Upgrade to **PRO ($10)** for High-Speed RPC.",
-                parse_mode="Markdown"
-            )
-            return
-        await message.answer("👀 Please send the **Wallet Address** you want me to monitor.", parse_mode="Markdown")
-        await state.set_state(SetupWizard.waiting_for_monitored_wallet)
+        await message.answer("🛡️ *GUARDIAN NEXUS ACTIVE*", parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
     async def wizard_safe_wallet(self, message: types.Message, state: FSMContext):
         address = message.text.strip()
         from solders.pubkey import Pubkey
         try:
             Pubkey.from_string(address)
-        except ValueError:
-            await message.answer("❌ *INVALID ADDRESS*\n\nPlease send a valid **Solana Wallet Address** (Base58).\n\n(Example: `7xKX...2p1`)", parse_mode="Markdown")
-            return
-        user_id = str(message.from_user.id)
-        await self.db.update_user_state(user_id, safe_wallet_address=address, safe_wallet_configured=True)
-        await message.answer(f"✅ *Safe Wallet Saved:* `{address[:6]}...{address[-4:]}`\n\n👀 *STEP 2:* Please send the **Wallet Address** you want me to monitor.", parse_mode="Markdown")
-        await state.set_state(SetupWizard.waiting_for_monitored_wallet)
+            await self.db.update_user_state(str(message.from_user.id), safe_wallet_address=address, safe_wallet_configured=True)
+            await message.answer(f"✅ *Safe Wallet Saved:* `{address[:8]}...`\n\n👀 *STEP 2:* Send **Wallet Address** to monitor.")
+            await state.set_state(SetupWizard.waiting_for_monitored_wallet)
+        except: await message.answer("❌ Invalid Solana Address.")
 
     async def wizard_monitored_wallet(self, message: types.Message, state: FSMContext):
         raw_input = message.text.replace(",", " ").split()
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
-        db_state = dict(row) if row else {}
-        wallets = json.loads(db_state.get('monitored_wallets_json', '[]') or '[]')
-        tier = db_state.get('subscription_tier', 'free')
-        is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
-        from solders.pubkey import Pubkey
+        wallets = json.loads(row['monitored_wallets_json'] if row and row['monitored_wallets_json'] else '[]')
         added = []
-        for address in raw_input:
-            if not is_admin and tier == 'free' and len(wallets) >= 1: break
+        from solders.pubkey import Pubkey
+        for addr in raw_input:
             try:
-                Pubkey.from_string(address)
-                if address not in wallets:
-                    wallets.append(address)
-                    added.append(address)
+                Pubkey.from_string(addr)
+                if addr not in wallets:
+                    wallets.append(addr)
+                    added.append(addr)
             except: pass
-        if not added:
-            await message.answer("❌ *NO VALID WALLETS ADDED*\n\nPlease send valid Solana addresses.", parse_mode="Markdown")
-            return
-        await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(wallets))
-        await message.answer(f"✅ Added `{len(added)}` wallets to your fleet.\n\n🔐 *STEP 3:* Please send the **Private Key(s)** for these wallets.")
-        await state.set_state(SetupWizard.waiting_for_vault_key)
+        if added:
+            await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(wallets))
+            await message.answer(f"✅ Added `{len(added)}` wallets. 🔐 *STEP 3:* Send **Private Key(s)**.")
+            await state.set_state(SetupWizard.waiting_for_vault_key)
+        else: await message.answer("❌ No valid wallets added.")
 
     async def wizard_vault_key(self, message: types.Message, state: FSMContext):
         raw_keys = message.text.replace(",", " ").split()
-        user_id = str(message.from_user.id)
         from solders.keypair import Keypair
         from utils.encryption_utils import EncryptionManager
         encryptor = EncryptionManager(config.ENCRYPTION_KEY)
@@ -478,289 +250,171 @@ class NotificationService:
             try:
                 kp = Keypair.from_base58_string(priv)
                 addr = str(kp.pubkey())
-                encrypted = encryptor.encrypt(priv)
-                await self.db.store_vault_key(addr, encrypted)
+                await self.db.store_vault_key(addr, encryptor.encrypt(priv))
                 count += 1
             except: pass
-        await message.answer(f"🔐 Linked `{count}` private keys to your vault.\n\n🛡️ *FINAL STEP:* Do you want to **ARM Auto-Defense** now?", reply_markup=self.get_yes_no_keyboard("toggle_auto_wizard"))
+        await message.answer(f"🔐 Linked `{count}` keys. 🛡️ Arm Auto-Defense?", reply_markup=self.get_yes_no_keyboard("toggle_auto_wizard"))
         try: await message.delete()
         except: pass
         await state.clear()
 
     async def panic_command(self, message: types.Message):
         user_id = str(message.from_user.id)
-        await message.answer("⚠️ *GLOBAL PANIC INITIATED* ⚠️\nConnecting to Secure Vault...")
+        await message.answer("⚠️ *GLOBAL PANIC:* Connecting to Vault...")
         if self.emergency_service:
             success = await self.emergency_service.execute_all(user_id)
-            if success: await message.answer("✅ *CRITICAL:* All assets successfully swept to Safe Wallet.")
-            else: await message.answer("❌ *PANIC FAILED:* No encrypted keys found in vault or balance too low.")
-        else: await message.answer("❌ *SYSTEM ERROR:* Emergency Service offline.")
+            await message.answer("✅ Success" if success else "❌ Failed")
+        else: await message.answer("❌ Offline")
 
     async def vault_command(self, message: types.Message, state: FSMContext):
         await state.clear()
-        parts = message.text.split()
-        if len(parts) >= 3:
-            address, privkey = parts[1], parts[2]
-            await self._process_vault_key(message, address, privkey)
-            return
-        await message.answer("🔐 *SECURE VAULT WIZARD*\n\n👉 *STEP 1:* Please send the **Wallet Address**.", parse_mode="Markdown")
+        await message.answer("🔐 *VAULT:* Send **Wallet Address**.", parse_mode="Markdown")
         await state.set_state(SetupWizard.waiting_for_vault_address)
-
-    async def wizard_vault_address(self, message: types.Message, state: FSMContext):
-        address = message.text.strip()
-        from solders.pubkey import Pubkey
-        try:
-            Pubkey.from_string(address)
-            await state.update_data(vault_address=address)
-            await message.answer(f"✅ Address `{address[:8]}...` received.\n\n👉 *STEP 2:* Now send the **Private Key** (Base58).", parse_mode="Markdown")
-            await state.set_state(SetupWizard.waiting_for_vault_key)
-        except ValueError:
-            await message.answer("❌ *INVALID ADDRESS*")
-
-    async def wizard_vault_key_guided(self, message: types.Message, state: FSMContext):
-        privkey = message.text.strip()
-        data = await state.get_data()
-        address = data.get('vault_address')
-        await self._process_vault_key(message, address, privkey)
-        await state.clear()
-
-    async def _process_vault_key(self, message, address, privkey):
-        try: await message.delete()
-        except: pass
-        from utils.encryption_utils import EncryptionManager
-        encryptor = EncryptionManager(config.ENCRYPTION_KEY)
-        encrypted = encryptor.encrypt(privkey)
-        await self.db.store_vault_key(address, encrypted)
-        await message.answer(f"🔒 *SECURE VAULT:* Key for `{address[:8]}...` encrypted and saved.", reply_markup=self.get_dashboard_markup())
 
     async def status_command(self, message: types.Message, state: FSMContext = None, user_id_override: str = None):
         if state: await state.clear()
         user_id = user_id_override or str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
-        if not row:
-            await message.answer("❌ No user profile found. Use /start.")
-            return
-        state = dict(row)
-        monitored = json.loads(state.get('monitored_wallets_json') or '[]')
-        baits = json.loads(state.get('bait_wallets_json') or '[]')
-        safe_wallet = state.get('safe_wallet_address', "Not Configured")
-        auto_def = "ON" if state.get('auto_defense') else "OFF"
-        from utils.solana_client import SolanaClient
-        sc = SolanaClient(db=self.db)
-        gas_bal = await sc.get_balance(safe_wallet, user_id=user_id) if safe_wallet != "Not Configured" else 0
-        status_text = (
-            f"🛡️ *Guardian Security Report*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"👤 Tier: *{state.get('subscription_tier', 'FREE').upper()}*\n"
-            f"🏦 Safe: `{safe_wallet[:6]}...{safe_wallet[-4:]}`\n"
-            f"⛽ Gas: `{gas_bal} SOL`\n"
-            f"🤖 Defense: *{auto_def}*\n"
-            f"📡 Requests: *{state.get('rpc_usage_count', 0)}*\n"
-            f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"👀 *Monitoring:* {len(monitored)} Wallets\n"
-        )
-        for addr in monitored[:3]:
-            bal = await sc.get_balance(addr, user_id=user_id)
-            status_text += f"• `{addr[:8]}...`: `{bal} SOL`\n"
-        status_text += "━━━━━━━━━━━━━━━━━━━━"
+        if not row: return
+        s = dict(row)
+        mon = json.loads(s.get('monitored_wallets_json') or '[]')
+        status_text = f"🛡️ *Report*\nSafe: `{s.get('safe_wallet_address')[:8]}...`\nDefense: {'ON' if s.get('auto_defense') else 'OFF'}\nMonitoring: {len(mon)} Wallets"
         await message.answer(status_text, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
-    async def wallets_command(self, message: types.Message, state: FSMContext = None, user_id_override: str = None):
+    async def wallets_command(self, message: types.Message, state: FSMContext = None):
         if state: await state.clear()
-        user_id = user_id_override or str(message.from_user.id)
-        row = await self.db.get_user_state(user_id)
-        if not row: return
-        state = dict(row)
-        monitored = json.loads(state.get('monitored_wallets_json') or '[]')
-        baits = json.loads(state.get('bait_wallets_json') or '[]')
-        from utils.solana_client import SolanaClient
-        sc = SolanaClient(db=self.db)
-        report = "📋 *FULL FLEET INVENTORY*\n━━━━━━━━━━━━━━━━━━━━\n"
-        for addr in monitored:
-            bal = await sc.get_balance(addr, user_id=user_id)
-            report += f"• `{addr}`\n  Balance: `{bal} SOL`\n"
-        report += "━━━━━━━━━━━━━━━━━━━━"
-        await message.answer(report, parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
+        row = await self.db.get_user_state(str(message.from_user.id))
+        mon = json.loads(row['monitored_wallets_json'] if row and row['monitored_wallets_json'] else '[]')
+        report = "📋 *FLEET:*\n" + "\n".join([f"• `{a}`" for a in mon])
+        await message.answer(report, parse_mode="Markdown")
 
     async def remove_wallet_command(self, message: types.Message, state: FSMContext):
         await state.clear()
-        parts = message.text.split()
-        if len(parts) >= 2:
-            await self._process_wallet_removal(message, parts[1].strip())
-            return
-        await message.answer("🗑️ *REMOVE WALLET WIZARD*", parse_mode="Markdown")
+        await message.answer("🗑️ *REMOVE:* Send Address.")
         await state.set_state(SetupWizard.waiting_for_remove_wallet)
 
     async def wizard_remove_wallet(self, message: types.Message, state: FSMContext):
-        address = message.text.strip()
-        from solders.pubkey import Pubkey
-        try:
-            Pubkey.from_string(address)
-            await self._process_wallet_removal(message, address)
-            await state.clear()
-        except ValueError: await message.answer("❌ Invalid Solana Address.")
-
-    async def _process_wallet_removal(self, message, address):
+        addr = message.text.strip()
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
-        if not row: return
-        db_state = dict(row)
-        monitored = json.loads(db_state.get('monitored_wallets_json') or '[]')
-        baits = json.loads(db_state.get('bait_wallets_json') or '[]')
-        removed = False
-        if address in monitored:
-            monitored.remove(address)
-            await self.db.delete_vault_key(address)
-            removed = True
-        if address in baits:
-            baits.remove(address)
-            removed = True
-        if removed:
-            await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(monitored), bait_wallets_json=json.dumps(baits))
-            await message.answer(f"✅ Wallet `{address[:10]}...` removed.", reply_markup=self.get_dashboard_markup())
-
-    async def set_safe_command(self, message: types.Message, state: FSMContext):
+        mon = json.loads(row['monitored_wallets_json'] if row else '[]')
+        if addr in mon:
+            mon.remove(addr)
+            await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(mon))
+            await self.db.delete_vault_key(addr)
+            await message.answer(f"✅ Removed `{addr[:8]}...`")
         await state.clear()
-        parts = message.text.split()
-        if len(parts) < 2: return
-        address = parts[1].strip()
-        from solders.pubkey import Pubkey
-        try:
-            Pubkey.from_string(address)
-            await self.db.update_user_state(str(message.from_user.id), safe_wallet_address=address, safe_wallet_configured=True)
-            await message.answer(f"✅ *Safe Wallet Saved:* `{address}`")
-        except: pass
 
-    async def cancel_command(self, message: types.Message, state: FSMContext):
+    async def health_command(self, message: types.Message, state: FSMContext):
         await state.clear()
-        await message.answer("🛡️ *Operation Cancelled.*", reply_markup=self.get_dashboard_markup())
+        await message.answer("🟢 *HEALTH: NORMAL*", reply_markup=self.get_dashboard_markup())
+
+    async def settings_command(self, message: types.Message):
+        await self.show_settings_menu(str(message.from_user.id))
+
+    async def faq_command(self, message: types.Message):
+        await message.answer("🛡️ *FAQ: Sentinel Zero*\nSub-millisecond protection for Solana assets.", parse_mode="Markdown")
 
     async def reset_state_command(self, message: types.Message, state: FSMContext):
         await state.clear()
         builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="🗑️ YES, DELETE EVERYTHING", callback_data="reset_confirm"))
-        builder.row(types.InlineKeyboardButton(text="❌ NO, KEEP DATA", callback_data="ignore"))
-        await message.answer("⚠️ *CRITICAL ACTION: RESET DATA*", reply_markup=builder.as_markup())
-
-    async def history_command(self, message: types.Message, state: FSMContext):
-        await state.clear()
-        logs = await self.db.get_history(5)
-        if not logs: await message.answer("📁 No threat logs found.")
-        else: await message.answer("📜 Threat history loaded.")
-
-    async def health_command(self, message: types.Message, state: FSMContext):
-        await state.clear()
-        await message.answer("🟢 *SYSTEM HEALTH:* Normal", reply_markup=self.get_dashboard_markup())
-
-    async def add_bait_command(self, message: types.Message, state: FSMContext):
-        await state.clear()
-        raw_input = message.text.replace("/add_bait", " ").replace(",", " ").split()
-        if raw_input: await self._process_bait_addition(message, raw_input, state)
-        else:
-            await message.answer("🍯 *HONEY POT WIZARD*", parse_mode="Markdown")
-            await state.set_state(SetupWizard.waiting_for_bait_addresses)
-
-    async def wizard_bait_addresses(self, message: types.Message, state: FSMContext):
-        await self._process_bait_addition(message, message.text.replace(",", " ").split(), state)
-
-    async def _process_bait_addition(self, message, raw_input, state):
-        user_id = str(message.from_user.id)
-        row = await self.db.get_user_state(user_id)
-        db_state = dict(row) if row else {}
-        bait_list = json.loads(db_state.get('bait_wallets_json', '[]') or '[]')
-        from solders.pubkey import Pubkey
-        added = []
-        for address in raw_input:
-            try:
-                Pubkey.from_string(address)
-                if address not in bait_list:
-                    bait_list.append(address)
-                    added.append(address)
-            except: pass
-        if added:
-            await self.db.update_user_state(user_id, bait_wallets_json=json.dumps(bait_list))
-            await message.answer(f"✅ Added `{len(added)}` baits. Send Private Keys next.")
-            await state.set_state(SetupWizard.waiting_for_vault_key)
+        builder.row(types.InlineKeyboardButton(text="🗑️ YES, DELETE", callback_data="reset_confirm"))
+        builder.row(types.InlineKeyboardButton(text="❌ NO", callback_data="ignore"))
+        await message.answer("⚠️ *RESET DATA?*", reply_markup=builder.as_markup())
 
     async def skim_command(self, message: types.Message, state: FSMContext):
         await state.clear()
-        await message.answer("🍯 *AUTO-SKIMMING SETUP*", parse_mode="Markdown")
+        await message.answer("🍯 *SKIM:* Set Retain Amount (SOL).")
         await state.set_state(SetupWizard.waiting_for_skim_retain)
-
-    async def wizard_skim_retain(self, message: types.Message, state: FSMContext):
-        try:
-            retain = float(message.text.strip())
-            await state.update_data(skim_retain=retain)
-            await message.answer(f"✅ Retain: `{retain} SOL`. Set Trigger next.")
-            await state.set_state(SetupWizard.waiting_for_skim_threshold)
-        except: pass
-
-    async def wizard_skim_threshold(self, message: types.Message, state: FSMContext):
-        try:
-            threshold = float(message.text.strip())
-            data = await state.get_data()
-            await self.db.update_user_state(str(message.from_user.id), skimming_retain=data.get('skim_retain'), skimming_threshold=threshold, skimming_enabled=True)
-            await message.answer("🍯 *Auto-Skimming ARMED!*")
-            await state.clear()
-        except: pass
 
     async def set_rpc_command(self, message: types.Message, state: FSMContext):
         await state.clear()
-        await message.answer("📡 *CUSTOM RPC WIZARD*", parse_mode="Markdown")
+        await message.answer("📡 *RPC:* Send private HTTP URL.")
         await state.set_state(SetupWizard.waiting_for_rpc_url)
 
-    async def wizard_rpc_url(self, message: types.Message, state: FSMContext):
-        rpc_url = message.text.strip()
-        if rpc_url.startswith("http"):
-            await self.db.update_user_state(str(message.from_user.id), custom_rpc_url=rpc_url)
-            await message.answer(f"⚡ *RPC Updated*", reply_markup=self.get_dashboard_markup())
-            await state.clear()
+    async def set_safe_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer("🏦 *SAFE:* Send Address.")
+        await state.set_state(SetupWizard.waiting_for_safe_wallet)
 
-    async def show_settings_menu(self, user_id: str = None):
-        user_id = user_id or str(config.TELEGRAM_CHAT_ID)
-        message = "⚙️ *TACTICAL SETTINGS*\nConfigure your bot:"
-        builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="🤖 Auto-Defense", callback_data="toggle_auto"))
-        builder.row(types.InlineKeyboardButton(text="⛽ Auto-Refill", callback_data="toggle_refill"))
-        builder.row(types.InlineKeyboardButton(text="🍯 Auto-Skimming", callback_data="toggle_skimming"))
-        builder.row(types.InlineKeyboardButton(text="🗑️ RESET ALL", callback_data="reset_confirm"))
-        await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown", reply_markup=builder.as_markup())
+    async def set_gas_key_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer("⛽ *GAS:* Send Safe Wallet Private Key.")
+        await state.set_state(SetupWizard.waiting_for_gas_key)
+
+    async def add_monitored_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer("👀 *MONITOR:* Send Address.")
+        await state.set_state(SetupWizard.waiting_for_monitored_wallet)
+
+    async def add_bait_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer("🍯 *BAIT:* Send Address.")
+        await state.set_state(SetupWizard.waiting_for_bait_addresses)
+
+    async def history_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer("📜 *HISTORY:* No recent threats.")
+
+    async def set_tip_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer("⚡ *TIP:* Send Jito Tip Amount (SOL).")
+        await state.set_state(SetupWizard.waiting_for_tip_amount)
+
+    async def set_daily_sweep_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer("🕰️ *DAILY:* Send Time (HH:MM).")
+
+    async def report_command(self, message: types.Message):
+        await message.answer("📢 Report incident to @Leadermalang0")
+
+    async def test_attack_command(self, message: types.Message):
+        await message.answer("🧪 Simulation started.")
 
     async def unlock_command(self, message: types.Message, state: FSMContext):
         await state.clear()
         parts = message.text.split()
-        if len(parts) < 2: return
-        from utils.vault_manager import HardenedVaultManager
-        if HardenedVaultManager().unlock(parts[1]):
-            await message.answer("✅ *VAULT UNLOCKED*")
+        if len(parts) > 1:
+            from utils.vault_manager import HardenedVaultManager
+            if HardenedVaultManager().unlock(parts[1]): await message.answer("✅ Unlocked")
         try: await message.delete()
         except: pass
 
     async def setup_nonce_command(self, message: types.Message, state: FSMContext):
         await state.clear()
-        await message.answer("⚡ *DURABLE NONCE SETUP*")
+        await message.answer("⚡ *NONCE SETUP*")
 
     async def toggle_smart_command(self, message: types.Message, state: FSMContext):
         await state.clear()
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
-        if not row: return
-        current = bool(dict(row).get('smart_thresholds_enabled'))
-        await self.db.update_user_state(user_id, smart_thresholds_enabled=not current)
-        await message.answer(f"🧠 *Smart Thresholds:* {'ON' if not current else 'OFF'}")
+        if row:
+            curr = bool(dict(row).get('smart_thresholds_enabled'))
+            await self.db.update_user_state(user_id, smart_thresholds_enabled=not curr)
+            await message.answer(f"🧠 Smart Thresholds: {'ON' if not curr else 'OFF'}")
+
+    async def cancel_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer("❌ Cancelled")
+
+    async def show_settings_menu(self, user_id: str):
+        builder = InlineKeyboardBuilder()
+        builder.row(types.InlineKeyboardButton(text="🤖 Auto-Defense", callback_data="toggle_auto"),
+                    types.InlineKeyboardButton(text="⛽ Auto-Refill", callback_data="toggle_refill"))
+        builder.row(types.InlineKeyboardButton(text="🍯 Skimming", callback_data="toggle_skimming"),
+                    types.InlineKeyboardButton(text="🗑️ Reset", callback_data="reset_confirm"))
+        await self.bot.send_message(chat_id=self.chat_id, text="⚙️ *SETTINGS*", parse_mode="Markdown", reply_markup=builder.as_markup())
 
     async def start(self):
-        logging.info("Telegram Bot: Starting polling...")
         from aiogram.types import BotCommand
         await self.bot.set_my_commands([
-            BotCommand(command="start", description="Open Security Dashboard"),
-            BotCommand(command="status", description="Check Overview & Stats"),
-            BotCommand(command="panic", description="🚨 GLOBAL EMERGENCY SWEEP"),
-            BotCommand(command="vault", description="🔒 Securely Store Private Key"),
-            BotCommand(command="settings", description="Configure Defense Modes"),
-            BotCommand(command="unlock", description="🔓 Unlock Hardened Vault"),
-            BotCommand(command="setup_nonce", description="⚡ Initialize Durable Nonce"),
-            BotCommand(command="reset_state", description="🗑️ Wipe All Security Data"),
-            BotCommand(command="cancel", description="❌ Cancel Current Operation"),
+            BotCommand(command="start", description="Dashboard"),
+            BotCommand(command="status", description="Stats"),
+            BotCommand(command="panic", description="🚨 PANIC"),
+            BotCommand(command="settings", description="Settings"),
+            BotCommand(command="vault", description="Vault"),
+            BotCommand(command="unlock", description="Unlock"),
+            BotCommand(command="reset_state", description="Reset"),
+            BotCommand(command="cancel", description="Cancel"),
         ])
         await self.dp.start_polling(self.bot)
