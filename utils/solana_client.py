@@ -72,32 +72,57 @@ class SolanaClient:
                 return self.client
         
         # 3. Free Tier Fallback (Use first configured RPC - respects .env)
-        return AsyncClient(config.SOLANA_RPC_URLS[0])
+        url = config.SOLANA_RPC_URLS[0]
+        return AsyncClient(url, extra_headers=get_atn_headers(url))
 
-    async def get_balance(self, address: str, user_id: str = None, retries=3):
-        if retries < 0:
-            return 0.0
-        pubkey = Pubkey.from_string(address)
-        
-        # Use custom client if user_id provided
-        target_client = await self.get_client_for_user(user_id) if user_id else self.client
-        
+    async def get_balance(self, address: str, user_id: str = None, retries: int = 3) -> float:
+        """Gets balance for an address with retry/backoff logic."""
+        client = await self.get_client_for_user(user_id) if user_id else self.client
         try:
-            response = await target_client.get_balance(pubkey)
-            # If we created a temp client, we should close it (simplified here)
+            pub = Pubkey.from_string(str(address))
+            response = await client.get_balance(pub)
             return response.value / 1e9
         except Exception as e:
-            error_details = ""
-            if hasattr(e, 'response') and hasattr(e.response, 'text'):
-                error_details = e.response.text
-            
             if retries <= 0:
-                logging.error(f"❌ RPC Final Failure: {e} | Details: {error_details}")
+                logging.error(f"❌ RPC Final Failure (Balance): {e}")
                 return 0.0
-            
-            logging.error(f"RPC Error ({retries} retries left): {e} | Details: {error_details}")
+            wait_time = (4 - retries) * 1.5 
+            logging.warning(f"RPC Balance Error ({retries} retries left): {e}. Retrying in {wait_time}s...")
+            await asyncio.sleep(wait_time)
             await self.pool.rotate_endpoint()
             return await self.get_balance(address, user_id, retries - 1)
+
+    async def get_latest_blockhash(self, user_id: str = None, retries: int = 3):
+        """Gets latest blockhash with retry/backoff logic."""
+        client = await self.get_client_for_user(user_id) if user_id else self.client
+        try:
+            response = await client.get_latest_blockhash()
+            return response.value
+        except Exception as e:
+            if retries <= 0:
+                logging.error(f"❌ RPC Final Failure (Blockhash): {e}")
+                return None
+            wait_time = (4 - retries) * 1.5 
+            logging.warning(f"RPC Blockhash Error ({retries} retries left): {e}. Retrying in {wait_time}s...")
+            await asyncio.sleep(wait_time)
+            await self.pool.rotate_endpoint()
+            return await self.get_latest_blockhash(user_id, retries - 1)
+
+    async def send_raw_transaction(self, tx_bytes: bytes, user_id: str = None, retries: int = 3):
+        """Sends raw transaction with retry/backoff logic."""
+        client = await self.get_client_for_user(user_id) if user_id else self.client
+        try:
+            response = await client.send_raw_transaction(tx_bytes)
+            return response
+        except Exception as e:
+            if retries <= 0:
+                logging.error(f"❌ RPC Final Failure (SendTX): {e}")
+                return None
+            wait_time = (4 - retries) * 1.5 
+            logging.warning(f"RPC SendTX Error ({retries} retries left): {e}. Retrying in {wait_time}s...")
+            await asyncio.sleep(wait_time)
+            await self.pool.rotate_endpoint()
+            return await self.send_raw_transaction(tx_bytes, user_id, retries - 1)
 
     async def close(self):
         for client in self.pool.clients:

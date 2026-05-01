@@ -89,22 +89,22 @@ class EmergencyTransfer:
             raise
         
         # 2. Gas Check & Auto-Refill
-        balance_resp = await client.get_balance(source_kp.pubkey())
-        balance = balance_resp.value
-        min_required = 10000 + tip_lamports + retain_lamports # base fee + tip + retain
+        balance = await self.solana_client.get_balance(source_kp.pubkey(), user_id)
+        balance_lamports = int(balance * 1_000_000_000)
+        min_required_lamports = 10000 + tip_lamports + retain_lamports # base fee + tip + retain
 
         try:
-            if balance < min_required:
+            if balance_lamports < min_required_lamports:
                 if auto_refill:
                     logging.info(f"⛽ Auto-Refill: Injecting gas into {source_kp.pubkey()}...")
-                    success = await self._inject_gas(source_kp.pubkey(), client, user_id, db)
+                    success = await self._inject_gas(source_kp.pubkey(), user_id, db)
                     if not success:
                         logging.error("Refill failed. Cannot sweep.")
                         return None
                     # Wait for refill confirmation
                     await asyncio.sleep(2)
-                    balance_resp = await client.get_balance(source_kp.pubkey())
-                    balance = balance_resp.value
+                    balance = await self.solana_client.get_balance(source_kp.pubkey(), user_id)
+                    balance_lamports = int(balance * 1_000_000_000)
                 else:
                     logging.warning(f"Insufficient gas in {source_kp.pubkey()} and Auto-Refill is OFF.")
                     return None
@@ -128,13 +128,15 @@ class EmergencyTransfer:
                 from_pubkey=source_kp.pubkey(), to_pubkey=tip_account, lamports=tip_lamports
             ))
 
-            recent_blockhash = await client.get_latest_blockhash()
+            recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
+            if not recent_blockhash: return None
+
             msg = Message.new_with_blockhash(
                 [transfer_ix, tip_ix],
                 source_kp.pubkey(),
-                recent_blockhash.value.blockhash
+                recent_blockhash
             )
-            tx = Transaction([source_kp], msg, recent_blockhash.value.blockhash)
+            tx = Transaction([source_kp], msg, recent_blockhash)
 
             signature = await self.jito_client.send_bundle([tx])
             if signature:
@@ -144,11 +146,11 @@ class EmergencyTransfer:
             
             # FALLBACK: If Jito fails, send via regular RPC
             logging.warning("⚠️ Jito Bundle failed. Falling back to standard RPC broadcast...")
-            signature = await client.send_raw_transaction(bytes(tx))
+            signature = await self.solana_client.send_raw_transaction(bytes(tx), user_id)
             if signature:
-                SignatureRegistry().register(str(signature.value))
-                logging.info(f"✅ Fallback Sweep Success! Sig: {signature.value}")
-                return str(signature.value)
+                SignatureRegistry().register(signature)
+                logging.info(f"✅ Fallback Sweep Success! Sig: {signature}")
+                return signature
 
             return None
         except Exception as e:
@@ -158,7 +160,7 @@ class EmergencyTransfer:
             if user_id and client != self.solana_client.client:
                 await client.close()
 
-    async def _inject_gas(self, target_pubkey, client, user_id, db):
+    async def _inject_gas(self, target_pubkey, user_id, db):
         """Sends a small amount of SOL from the safe wallet to the target."""
         try:
             # 1. Try to get user's personal gas key first
@@ -184,9 +186,9 @@ class EmergencyTransfer:
 
             safe_kp = Keypair.from_base58_string(privkey)
             # 2.5 Balance Check for Gas Source
-            safe_bal = await client.get_balance(safe_kp.pubkey())
-            if safe_bal.value < 6_000_000: # 0.005 + fee
-                logging.error(f"❌ GAS TANK EMPTY: {safe_kp.pubkey()} only has {safe_bal.value/1e9} SOL. Please fund it for Auto-Refill.")
+            balance = await self.solana_client.get_balance(safe_kp.pubkey(), user_id)
+            if balance < 0.006: # 0.005 + fee
+                logging.error(f"❌ GAS TANK EMPTY: {safe_kp.pubkey()} only has {balance} SOL. Please fund it for Auto-Refill.")
                 return False
 
             # Inject 0.005 SOL (enough for multiple rescue attempts)
@@ -195,15 +197,17 @@ class EmergencyTransfer:
                 to_pubkey=target_pubkey,
                 lamports=5_000_000 
             ))
-            recent_blockhash = await client.get_latest_blockhash()
+            recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
+            if not recent_blockhash: return False
+
             msg = Message.new_with_blockhash(
                 [refill_ix],
                 safe_kp.pubkey(),
-                recent_blockhash.value.blockhash
+                recent_blockhash
             )
-            tx = Transaction([safe_kp], msg, recent_blockhash.value.blockhash)
+            tx = Transaction([safe_kp], msg, recent_blockhash)
             
-            res = await client.send_raw_transaction(bytes(tx))
+            res = await self.solana_client.send_raw_transaction(bytes(tx), user_id)
             logging.info(f"⛽ Gas Injected for user {user_id}: {res}")
             return True
         except Exception as e:
