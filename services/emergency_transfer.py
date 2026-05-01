@@ -116,14 +116,16 @@ class EmergencyTransfer:
             
             # 3. Dynamic Aggression (High Value Protection)
             # If rescuing > 1 SOL, force a 0.005 tip for maximum safety
-            if balance > 1_000_000_000:
-                logging.warning(f"🚀 HIGH VALUE DETECTED ({balance/1e9} SOL). Ramping Tip to 0.005 SOL for maximum priority.")
+            if balance > 1.0:
+                logging.warning(f"🚀 HIGH VALUE DETECTED ({balance} SOL). Ramping Tip to 0.005 SOL for maximum priority.")
                 tip_sol = 0.005
                 tip_lamports = 5_000_000
 
             # 3. Execute Sweep
-            amount_to_send = balance - tip_lamports - 5000 - retain_lamports
-            if amount_to_send <= 0: return None
+            amount_to_send = balance_lamports - tip_lamports - 5000 - retain_lamports
+            if amount_to_send <= 0:
+                logging.warning(f"Amount to send ({amount_to_send}) is zero or negative. Skipping.")
+                return None
 
             transfer_ix = transfer(TransferParams(
                 from_pubkey=source_kp.pubkey(), to_pubkey=destination, lamports=amount_to_send
