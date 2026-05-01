@@ -19,9 +19,10 @@ class JitoClient:
         # Jito Tip Accounts
         if is_devnet:
             self.tip_accounts = [
-                "3AVi9Tg9Uo68ayW9F4W9W9W9W9W9W9W9W9W9W9W9W9W", # Generic Devnet Tip
+                "3AVi9Tg9Uo68ayW9F4W9W9W9W9W9W9W9W9W9W9W9W9W",
                 "DfXoy6AnpY7E6P5w7vC3N8wS1v4tB4zD9ZzGZ2xJpM2w"
             ]
+        else:
             self.tip_accounts = [
                 "96g9sAg9u3mBsJqcPRrG9q3hc95vX28M7a9ZSRU6YvS5",
                 "HFqU5x63VTqvQss8hp11i4wVV8bD44PvwucfZ2bU7gRe",
