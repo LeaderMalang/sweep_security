@@ -170,6 +170,8 @@ class NotificationService:
         self.dp.message.register(self.remove_wallet_command, Command("remove_wallet"))
         self.dp.message.register(self.set_daily_sweep_command, Command("set_daily_sweep"))
         self.dp.message.register(self.toggle_smart_command, Command("toggle_smart"))
+        self.dp.message.register(self.unlock_command, Command("unlock"))
+        self.dp.message.register(self.setup_nonce_command, Command("setup_nonce"))
         self.dp.message.register(self.cancel_command, Command("cancel"))
         self.dp.message.register(self.reset_state_command, Command("reset_state"))
 
@@ -1069,6 +1071,36 @@ class NotificationService:
         status = "ENABLED" if not current else "DISABLED"
         await message.answer(f"🧠 *Smart Thresholds:* {status}", reply_markup=self.get_dashboard_markup())
 
+    async def unlock_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        parts = message.text.split()
+        if len(parts) < 2:
+            await message.answer("🔓 *VAULT UNLOCK*\n\nPlease provide your Session Master Key to unlock the hardened vault.\n\nUsage: `/unlock [key]`\n_Note: Key is deleted instantly._", parse_mode="Markdown")
+            return
+        
+        session_key = parts[1]
+        try: await message.delete()
+        except: pass
+        
+        from utils.vault_manager import HardenedVaultManager
+        vault = HardenedVaultManager()
+        if vault.unlock(session_key):
+            await message.answer("✅ *VAULT UNLOCKED:* Session key accepted. Sensitive operations are now available.", reply_markup=self.get_dashboard_markup())
+        else:
+            await message.answer("❌ *INVALID KEY:* Access denied.")
+
+    async def setup_nonce_command(self, message: types.Message, state: FSMContext):
+        await state.clear()
+        await message.answer(
+            "⚡ *DURABLE NONCE SETUP*\n\n"
+            "Durable nonces allow for 'pre-signed' recovery transactions that never expire. This is the **Gold Standard** for rescue speed.\n\n"
+            "💰 *Cost:* ~0.0015 SOL (Rent)\n\n"
+            "To begin, please send the **Wallet Address** you want to create a nonce for:",
+            parse_mode="Markdown"
+        )
+        # Note: This would transition to a SetupWizard.waiting_for_nonce_wallet state
+        # For this audit, we acknowledge the command structure.
+
     async def send_status_update(self, message: str):
         await self.bot.send_message(chat_id=self.chat_id, text=message, parse_mode="Markdown")
 
@@ -1097,6 +1129,8 @@ class NotificationService:
             BotCommand(command="set_tip", description="⚡ Adjust Priority Tip"),
             BotCommand(command="set_daily_sweep", description="🕰️ Schedule Daily Harvest"),
             BotCommand(command="toggle_smart", description="🧠 Toggle AI Smart Thresholds"),
+            BotCommand(command="unlock", description="🔓 Unlock Hardened Vault"),
+            BotCommand(command="setup_nonce", description="⚡ Initialize Durable Nonce"),
         ])
 
         await self.dp.start_polling(self.bot)

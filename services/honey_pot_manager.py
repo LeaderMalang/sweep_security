@@ -112,9 +112,20 @@ class HoneyPotManager:
                 await asyncio.sleep(10)
 
     async def start_monitoring(self):
-        """Monitors all users' bait and monitored wallets for activity."""
+        """Main loop for the Sentinel-Zero watchtower with reconnection logic."""
         logging.info("🔭 Sentinel-Zero: Dynamic Watchtower Active.")
-        
+        retry_delay = 1
+        while True:
+            try:
+                await self._run_sentinel_session()
+                retry_delay = 1 # Reset on success
+            except Exception as e:
+                logging.error(f"Sentinel Connection lost: {e}. Retrying in {retry_delay}s...")
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 60) # Exponential backoff
+
+    async def _run_sentinel_session(self):
+        """Internal logic for a single WebSocket session."""
         from utils.solana_client import get_atn_headers
         headers = get_atn_headers(config.SOLANA_WSS_URL)
         
@@ -143,14 +154,10 @@ class HoneyPotManager:
                 logging.info(f"🔭 Watchtower Subscribed: {wallet}")
 
             while True:
-                try:
-                    response = await websocket.recv()
-                    data = json.loads(response)
-                    if "params" in data:
-                        await self.handle_security_event(data["params"]["result"], all_wallets)
-                except Exception as e:
-                    logging.error(f"Sentinel Loop error: {e}")
-                    await asyncio.sleep(5)
+                response = await websocket.recv()
+                data = json.loads(response)
+                if "params" in data:
+                    await self.handle_security_event(data["params"]["result"], all_wallets)
 
     async def handle_security_event(self, result, monitored_list):
         """Identifies the victim and triggers an immediate counter-sweep."""

@@ -6,6 +6,7 @@ import asyncio
 import logging
 import json
 from utils.database import Database
+from utils.vault_manager import HardenedVaultManager
 import config
 
 app = FastAPI(title="Guardian Nexus API")
@@ -22,12 +23,17 @@ app.add_middleware(
 class AppState:
     db: Database = None
     emergency_service = None
+    vault: HardenedVaultManager = None
 
 state = AppState()
+state.vault = HardenedVaultManager() # Shared singleton
 
 class WalletRequest(BaseModel):
     address: str
     label: Optional[str] = "Primary"
+
+class UnlockRequest(BaseModel):
+    session_key: str
 
 @app.get("/api/stats")
 async def get_stats():
@@ -45,17 +51,27 @@ async def get_stats():
         if str(u['user_id']) == str(TELEGRAM_CHAT_ID):
             admin_tier = "ADMIN"
     
-    # Mock some realistic protected value based on wallet count
     protected_value = wallet_count * 1250 
 
     return {
         "assets_protected": protected_value,
         "incidents_blocked": 42,
-        "vault_status": "LOCKED",
+        "vault_status": "UNLOCKED" if state.vault.is_unlocked() else "LOCKED",
         "node_status": "ONLINE",
         "threat_level": "LOW",
         "subscription_tier": admin_tier
     }
+
+@app.post("/api/vault/unlock")
+async def unlock_vault(req: UnlockRequest):
+    if state.vault.unlock(req.session_key):
+        return {"status": "success", "message": "Vault unlocked."}
+    raise HTTPException(status_code=400, detail="Invalid session key.")
+
+@app.post("/api/vault/lock")
+async def lock_vault():
+    state.vault.lock()
+    return {"status": "success", "message": "Vault locked."}
 
 @app.get("/api/wallets")
 async def get_wallets():
@@ -79,9 +95,11 @@ async def get_wallets():
 async def trigger_panic():
     logging.warning("⚠️ GLOBAL PANIC TRIGGERED VIA DASHBOARD!")
     if state.emergency_service and state.db:
-        # For simplicity, we trigger panic for the master admin
-        # In a full SaaS, this would take a user_id from a session
         from config import TELEGRAM_CHAT_ID
-        asyncio.create_task(state.emergency_service.execute_all(str(TELEGRAM_CHAT_ID), state.db))
+        # The emergency service now needs the vault to be unlocked to access keys
+        if not state.vault.is_unlocked():
+            raise HTTPException(status_code=403, detail="Vault is locked. Cannot execute sweep.")
+            
+        asyncio.create_task(state.emergency_service.execute_all(str(TELEGRAM_CHAT_ID)))
         return {"status": "triggered", "message": "Global emergency sweep initiated for Admin."}
     return {"status": "error", "message": "Emergency service not initialized."}

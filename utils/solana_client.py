@@ -108,6 +108,23 @@ class SolanaClient:
             await self.pool.rotate_endpoint()
             return await self.get_latest_blockhash(user_id, retries - 1)
 
+    async def get_account_info(self, address: str, user_id: str = None, retries: int = 3):
+        """Gets account info with retry/backoff logic."""
+        client = await self.get_client_for_user(user_id) if user_id else self.client
+        try:
+            pub = Pubkey.from_string(str(address))
+            response = await client.get_account_info(pub)
+            return response.value
+        except Exception as e:
+            if retries <= 0:
+                logging.error(f"❌ RPC Final Failure (AccountInfo): {e}")
+                return None
+            wait_time = (4 - retries) * 1.5 
+            logging.warning(f"RPC AccountInfo Error ({retries} retries left): {e}. Retrying in {wait_time}s...")
+            await asyncio.sleep(wait_time)
+            await self.pool.rotate_endpoint()
+            return await self.get_account_info(address, user_id, retries - 1)
+
     async def send_raw_transaction(self, tx_bytes: bytes, user_id: str = None, retries: int = 3):
         """Sends raw transaction with retry/backoff logic."""
         client = await self.get_client_for_user(user_id) if user_id else self.client

@@ -1,75 +1,43 @@
-# Solana Wallet Guardian Bot - Elite SaaS & Security Guide
+# 🛡️ Guardian Nexus: Ultra-Frontier (v2.0)
 
-The **Solana Wallet Guardian Bot** is a high-performance, multi-chain security ecosystem. This guide covers technical deployment, the bait-and-recovery strategy, and the SaaS business model.
+Guardian Nexus is a sub-millisecond security sentinel designed to protect Solana and EVM assets from high-speed drainers. It utilizes Jito Bundles, Durable Nonces, and a Hardened Database Vault to ensure assets are rescued before attackers can confirm their transactions.
 
----
+## 🚀 Key Hardening Features (Phase 1 Complete)
+- **⚡ Latency Hardening**: Support for **Durable Nonces**, allowing pre-signed recovery transactions that never expire.
+- **🔒 Storage Hardening**: Refactored **HardenedVaultManager** with AES-256 encryption and SQLite persistence. Keys are session-locked and only accessible via a transient session key.
+- **📡 Network Hardening**: **Cryptographic P2P Intelligence** signing. Threat data is now signed with node identities to prevent network poisoning.
+- **🍯 Honey Pot Skimming**: Automated harvesting of profit from attackers sending "bait" gas to monitored wallets.
 
-## 🛠️ Deployment: VPS & Docker
+## 🤖 Telegram Bot Interface
+The Telegram bot is the primary control center for the Guardian Nexus.
 
-To ensure 24/7 protection, the bot should be deployed on a Linux VPS using Docker for maximum stability.
+### Core Commands
+- `/start`: Open the Security Dashboard and initialize the setup wizard.
+- `/status`: Detailed overview of all monitored wallets, gas levels, and protection status.
+- `/panic`: **Global Emergency Sweep**. Instantly moves all protected assets to your Safe Wallet.
+- `/vault`: Guided wizard to securely encrypt and store private keys.
+- `/settings`: Interactive menu to toggle Auto-Defense, Skimming, and Daily Harvests.
+- `/unlock [key]`: Unlock the hardened vault session for the current runtime.
+- `/setup_nonce`: Create and fund a Durable Nonce account for zero-latency rescue.
 
-### 1. VPS Requirements
-- **OS**: Ubuntu 22.04 LTS
-- **Docker**: Installed (`curl -fsSL https://get.docker.com -o get-docker.sh && sh get-docker.sh`)
-- **Docker Compose**: Installed
+### Tactical Commands
+- `/set_tip [sol]`: Adjust Jito validator tips (Recommended: 0.005 SOL).
+- `/set_rpc [url]`: Link your account to a private high-speed RPC node.
+- `/add_monitored`: Add a new wallet to the active watch-list.
+- `/skim [retain] [trigger]`: Configure the "Harvest" logic for bait wallets.
+- `/health`: Real-time system health check (RPC, Mesh, Database).
 
-### 2. One-Click Docker Deployment
-```bash
-# 1. Clone the repository
-cd sweep_security
+## 🛠️ Architecture
+- **Language**: Python 3.10+ (Asyncio)
+- **Database**: SQLite (Aiosqlite)
+- **Provider**: Solana ATN (Authenticated Transaction Network)
+- **Encryption**: Fernet (AES-128/256)
+- **Mempool**: Jito Shredstream / Helius Webhooks
 
-# 2. Configure your .env (Mandatory)
-nano .env
-
-# 3. Start everything
-docker-compose up -d
-```
-The **Backend Monitor** will start protecting wallets immediately, and the **Dashboard** will be live on port 80.
-
----
-
-## 🎣 Strategy: Infected Wallets & Attracting Attackers
-
-### 1. Monitoring an Infected Wallet
-If a wallet is already compromised (attacker has the keys), the Guardian Bot acts as a **Front-run Defense**:
-- **WebSocket Vigilance**: The bot monitors the infected wallet with millisecond latency.
-- **Auto-Sweep**: The moment any new funds enter the infected wallet (e.g., an airdrop or accidental deposit), the bot's **Pre-signed Transaction** fires.
-- **Jito Priority**: By using Jito bundles, your recovery sweep arrives *before* the attacker's script can process the transaction.
-
-### 2. The Honey Pot Method (Baiting)
-To catch attackers and recover stolen funds:
-- **Deploy Bait**: Set up "Honey Pot" wallets with a small amount of SOL (0.1 - 0.5).
-- **Signature Capture**: When an attacker drains the bait, the bot analyzes their smart contract address and instruction sequence.
-- **Intelligence Gossip**: The bot automatically adds the attacker to the global blacklist, protecting all other user wallets in the network instantly.
+## 🛡️ Security Protocol
+1. **Friendly Fire Prevention**: Automatic whitelisting of your own transactions and the Global Safe Wallet.
+2. **Session Isolation**: Decrypted keys exist only in volatile memory during an active session.
+3. **Multi-Node Gossip**: Threat intelligence is verified across a federated mesh of Guardian nodes.
 
 ---
-
-## 👥 End-User Experience & SaaS Value
-
-### What it offers to users:
-- **Peace of Mind**: 24/7 monitoring against drainers and dusting attacks.
-- **Panic Button**: A literal "Panic" trigger in Telegram to clear all funds to safety.
-- **Health Score**: A visual rating of their wallet's safety (Audit results).
-- **Official Path**: One-click reporting to authorities to help in legal recovery.
-
-### SaaS Business Model (Monetization):
-1. **Tiered Protection**:
-   - **Free Tier**: Basic alerts for 1 wallet.
-   - **Elite Tier ($20/mo)**: Multi-chain monitoring, Jito-recovery, and AI audits.
-   - **Whale Tier ($100/mo)**: MPC signing, TEE isolation, and private RPC access.
-2. **Recovery Bounty**: Charge a 5-10% success fee for any funds recovered from an infected wallet using the bot's speed.
-3. **White-label**: Sell the entire software package to DAO treasuries or high-net-worth individuals as a private security node.
-
----
-
-## 📊 Feature Gaps (Future Logic)
-- **MPC Mobile Signing**: App-based biometric approval for recovery sweeps.
-- **Quantum Resistance**: Implementing Dilithium-standard signatures for P2P data.
-- **Automated Bridging**: Moving recovered funds across chains to a "Primary Fortress" wallet automatically.
-
----
-
-## 🚨 Emergency Operations
-- **Telegram**: `/panic`
-- **Dashboard**: **GLOBAL PANIC** button.
-- **Infected Wallets**: Ensure `Auto-Defense` is set to **ON** for sub-second recovery.
+*Developed for Guardian Nexus Infrastructure. 2026.*

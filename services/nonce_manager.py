@@ -1,40 +1,50 @@
 import logging
-from solana.rpc.async_api import AsyncClient
 from solders.pubkey import Pubkey
-from solders.system_program import create_nonce_account, advance_nonce_account
-from solders.keypair import Keypair
-from solders.message import Message
-from solders.transaction import Transaction
+from solders.system_program import advance_nonce_account, AdvanceNonceAccountParams
+from solders.instruction import Instruction
 import config
 
 class NonceManager:
-    """
-    Manages Solana Durable Nonce Accounts for pre-signed, non-expiring transactions.
-    """
     def __init__(self, solana_client):
         self.solana_client = solana_client
-        self.nonce_accounts = {} # wallet_address -> nonce_account_pubkey
 
-    async def create_nonce_account_for_wallet(self, wallet_keypair: Keypair):
-        """Creates a new nonce account for a monitored wallet."""
-        nonce_account = Keypair()
-        rent_exemption = await self.solana_client.get_minimum_balance_for_rent_exemption(80) # Nonce account size
+    async def get_nonce_info(self, nonce_account_address: str, user_id: str = None):
+        """
+        Fetches the current nonce value and authority from a nonce account.
+        """
+        account_info = await self.solana_client.get_account_info(nonce_account_address, user_id)
+        if not account_info:
+            logging.error(f"Nonce account {nonce_account_address} not found.")
+            return None
+            
+        # Nonce accounts are 80 bytes. 
+        # Structure: [0:4] Version, [4:8] State (1 for initialized), [8:40] Authorized Pubkey, [40:72] Nonce, [72:80] Fee Calculator
+        data = account_info.data
+        if len(data) < 80:
+            logging.error(f"Invalid nonce account data length: {len(data)}")
+            return None
+            
+        # Parse state
+        state = int.from_bytes(data[4:8], "little")
+        if state != 1:
+            logging.error(f"Nonce account {nonce_account_address} is not initialized.")
+            return None
+            
+        authorized_pubkey = Pubkey(data[8:40])
+        nonce_value = Pubkey(data[40:72])
         
-        # Build instruction to create nonce account
-        # In a real implementation, this would be sent to the blockchain
-        logging.info(f"🆕 Creating Nonce Account: {nonce_account.pubkey()} for {wallet_keypair.pubkey()}")
-        
-        self.nonce_accounts[str(wallet_keypair.pubkey())] = nonce_account.pubkey()
-        return nonce_account.pubkey()
+        return {
+            "address": nonce_account_address,
+            "authority": authorized_pubkey,
+            "nonce": str(nonce_value)
+        }
 
-    async def get_active_nonce(self, nonce_pubkey: Pubkey):
-        """Retrieves the current nonce value from the blockchain."""
-        account_info = await self.solana_client.get_account_info(nonce_pubkey)
-        # Parse nonce data from account info
-        return "example_nonce_value"
-
-    async def advance_nonce(self, nonce_pubkey: Pubkey, authorized_keypair: Keypair):
-        """Advances the nonce to make it ready for the next pre-signed transaction."""
-        # Logic to send an 'advance_nonce' instruction
-        logging.info(f"🔄 Advancing Nonce: {nonce_pubkey}")
-        pass
+    def get_advance_instruction(self, nonce_account_address: str, authorized_pubkey: str) -> Instruction:
+        """
+        Creates the instruction to advance the nonce. 
+        Must be the first instruction in a transaction using a nonce.
+        """
+        return advance_nonce_account(AdvanceNonceAccountParams(
+            nonce_pubkey=Pubkey.from_string(nonce_account_address),
+            authorized_pubkey=Pubkey.from_string(authorized_pubkey)
+        ))
