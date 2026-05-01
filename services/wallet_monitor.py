@@ -69,14 +69,31 @@ class WalletMonitor:
     async def handle_notification(self, result):
         signature = result.get("value", {}).get("signature")
         logs = result.get("value", {}).get("logs", [])
-        
-        # Simplified: identify the wallet from the logs or meta
-        # (In a real implementation, you'd match subscription IDs)
-        # For demo, we'll assume we know the target_wallet
-        target_wallet = "SomeMonitoredWallet" 
-        
+
         if signature and SignatureRegistry().is_whitelisted(signature):
-            logging.info(f"✅ Friendly Fire Prevented: Ignoring own transaction {signature[:10]}...")
+            logging.info(f"✅ Friendly Fire Prevented: Ignoring own tx {signature[:10]}...")
+            return
+
+        # Identify which monitored wallet this event belongs to by scanning logs
+        target_wallet = None
+        for log_line in logs:
+            for wallet in self.wallet_to_user:
+                if wallet in log_line:
+                    target_wallet = wallet
+                    break
+            if target_wallet:
+                break
+
+        if not target_wallet:
+            # Fallback: check all monitored wallets in the raw result string
+            result_str = str(result)
+            for wallet in self.wallet_to_user:
+                if wallet in result_str:
+                    target_wallet = wallet
+                    break
+
+        if not target_wallet:
+            logging.debug("Could not identify target wallet from event. Skipping.")
             return
 
         if any("Transfer" in log for log in logs):

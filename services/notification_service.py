@@ -342,6 +342,48 @@ class NotificationService:
         await state.clear()
         await message.answer("❌ Cancelled")
 
+    async def handle_toggle_auto_wizard(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        action = callback.data.split("_")[-1]  # "yes" or "no"
+        if action == "yes":
+            await self.db.update_user_state(user_id, auto_defense=True)
+            await callback.message.edit_text("🚀 *AUTO-DEFENSE ARMED!* Your perimeter is now secured.", parse_mode="Markdown")
+        else:
+            await callback.message.edit_text("⚠️ *DEFENSE IDLE.* Auto-rescue is OFF. Enable via /settings.", parse_mode="Markdown")
+        await callback.answer()
+
+    async def handle_toggle_daily(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        curr = bool(dict(row).get('daily_sweep_enabled')) if row else False
+        await self.db.update_user_state(user_id, daily_sweep_enabled=not curr)
+        await callback.answer(f"🕰️ Daily Harvest: {'ON' if not curr else 'OFF'}")
+        await self.show_settings_menu(user_id)
+
+    async def handle_toggle_smart(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        curr = bool(dict(row).get('smart_thresholds_enabled')) if row else False
+        await self.db.update_user_state(user_id, smart_thresholds_enabled=not curr)
+        await callback.answer(f"🧠 Smart Thresholds: {'ON' if not curr else 'OFF'}")
+        await self.show_settings_menu(user_id)
+
+    async def handle_toggle_refill(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        curr = bool(dict(row).get('auto_refill_gas', True)) if row else True
+        await self.db.update_user_state(user_id, auto_refill_gas=not curr)
+        await callback.answer(f"⛽ Auto-Refill: {'ON' if not curr else 'OFF'}")
+        await self.show_settings_menu(user_id)
+
+    async def handle_toggle_skimming(self, callback: types.CallbackQuery):
+        user_id = str(callback.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        curr = bool(dict(row).get('skimming_enabled')) if row else False
+        await self.db.update_user_state(user_id, skimming_enabled=not curr)
+        await callback.answer(f"🍯 Skimming: {'ON' if not curr else 'OFF'}")
+        await self.show_settings_menu(user_id)
+
     async def show_settings_menu(self, user_id: str):
         builder = InlineKeyboardBuilder()
         builder.row(types.InlineKeyboardButton(text="🤖 Auto-Defense", callback_data="toggle_auto"),
@@ -448,4 +490,4 @@ class NotificationService:
         self.dp.callback_query.register(self.handle_toggle_smart, F.data == "toggle_smart")
         self.dp.callback_query.register(self.handle_toggle_refill, F.data == "toggle_refill")
         self.dp.callback_query.register(self.handle_toggle_skimming, F.data == "toggle_skimming")
-        self.dp.callback_query.register(self.handle_toggle_auto, F.data == "toggle_auto")
+
