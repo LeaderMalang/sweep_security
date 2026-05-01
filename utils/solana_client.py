@@ -5,22 +5,36 @@ from solana.rpc.async_api import AsyncClient
 from solders.pubkey import Pubkey
 from utils.atn_auth import get_atn_jwt
 
+def get_atn_headers():
+    token = get_atn_jwt()
+    headers = {"Referer": "https://troydex.io"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
+
 class SolanaConnectionPool:
     def __init__(self):
         self.endpoints = config.SOLANA_RPC_URLS
         
-        # Get JWT for All That Node
-        token = get_atn_jwt()
-        headers = {"Referer": "https://troydex.io"}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-            logging.info("🔑 ATN Auth: JWT generated successfully.")
-        
-        # Initialize pool of clients
+        # Initialize pool of clients with fresh headers
+        headers = get_atn_headers()
         self.clients = [AsyncClient(e, extra_headers=headers) for e in self.endpoints]
         self.current_index = 0
+        self.last_auth_time = asyncio.get_event_loop().time()
 
     def get_client(self) -> AsyncClient:
+        # Refresh pool if headers are older than 45 mins (ATN tokens expire)
+        try:
+            loop = asyncio.get_event_loop()
+            now = loop.time()
+            if now - self.last_auth_time > 2700: 
+                 headers = get_atn_headers()
+                 self.clients = [AsyncClient(e, extra_headers=headers) for e in self.endpoints]
+                 self.last_auth_time = now
+                 logging.info("♻️ RPC Pool: Headers refreshed.")
+        except Exception as e:
+            logging.error(f"Failed to refresh RPC pool: {e}")
+            
         return self.clients[self.current_index]
 
     async def rotate_endpoint(self):
@@ -48,7 +62,7 @@ class SolanaClient:
 
             # 1. Check for Custom RPC first (By-pass usage tracking)
             if state.get('custom_rpc_url'):
-                return AsyncClient(state['custom_rpc_url'], extra_headers={"Referer": "https://troydex.io"})
+                return AsyncClient(state['custom_rpc_url'], extra_headers=get_atn_headers())
 
             # 2. Using System RPC (Pro/Lite/Admin)
             tier = state.get('subscription_tier', 'free').lower()
