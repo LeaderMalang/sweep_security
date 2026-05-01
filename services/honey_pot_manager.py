@@ -140,6 +140,7 @@ class HoneyPotManager:
                     "params": [{"mentions": [wallet]}, {"commitment": "confirmed"}]
                 }
                 await websocket.send(json.dumps(subscribe_msg))
+                logging.info(f"🔭 Watchtower Subscribed: {wallet}")
 
             while True:
                 try:
