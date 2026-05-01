@@ -92,7 +92,7 @@ class HoneyPotManager:
                         # Get balance using user's specific RPC
                         balance = await self.solana_client.get_balance(wallet, user_id=user_id)
                         
-                        if balance >= threshold and balance > 0:
+                        if balance >= (threshold + 0.01) and balance > 0:
                             logging.warning(f"🍯 HARVEST DETECTED for User {user_id}: {wallet} balance ({balance}) hits threshold ({threshold})")
                             
                             encrypted_key = await self.db.get_vault_key(wallet)

@@ -3,8 +3,8 @@ from solders.keypair import Keypair
 from solders.pubkey import Pubkey
 from solders.system_program import transfer, TransferParams
 from solders.compute_budget import set_compute_unit_price, set_compute_unit_limit
-from solders.message import Message
-from solders.transaction import Transaction
+from solders.message import Message, MessageV0
+from solders.transaction import Transaction, VersionedTransaction
 from utils.jito_client import JitoClient
 import base58
 import config
@@ -138,12 +138,12 @@ class EmergencyTransfer:
             recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
             if not recent_blockhash: return None
 
-            tx = Transaction.new_signed_with_payer(
+            message = MessageV0.new_with_blockhash(
                 [transfer_ix, tip_ix],
                 source_kp.pubkey(),
-                [source_kp],
                 recent_blockhash
             )
+            tx = VersionedTransaction(message, [source_kp])
 
             signature = await self.jito_client.send_bundle([tx])
             if signature:
@@ -207,12 +207,12 @@ class EmergencyTransfer:
             recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
             if not recent_blockhash: return False
 
-            tx = Transaction.new_signed_with_payer(
+            message = MessageV0.new_with_blockhash(
                 [refill_ix],
                 safe_kp.pubkey(),
-                [safe_kp],
                 recent_blockhash
             )
+            tx = VersionedTransaction(message, [safe_kp])
             
             logging.info(f"⛽ [Refill] Broadcasting injection...")
             res = await self.solana_client.send_raw_transaction(bytes(tx), user_id)
