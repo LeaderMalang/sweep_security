@@ -10,11 +10,20 @@ class JitoClient:
         is_devnet = any("devnet" in url for url in config.SOLANA_RPC_URLS)
         
         if endpoint:
-            self.endpoint = endpoint
+            self.endpoints = [endpoint]
         else:
-            self.endpoint = "https://devnet.block-engine.jito.wtf/api/v1/bundles" if is_devnet else "https://mainnet.block-engine.jito.wtf/api/v1/bundles"
+            if is_devnet:
+                self.endpoints = ["https://devnet.block-engine.jito.wtf/api/v1/bundles"]
+            else:
+                self.endpoints = [
+                    "https://mainnet.block-engine.jito.wtf/api/v1/bundles",
+                    "https://ny.mainnet.block-engine.jito.wtf/api/v1/bundles",
+                    "https://amsterdam.mainnet.block-engine.jito.wtf/api/v1/bundles",
+                    "https://tokyo.mainnet.block-engine.jito.wtf/api/v1/bundles",
+                    "https://frankfurt.mainnet.block-engine.jito.wtf/api/v1/bundles"
+                ]
         
-        logging.info(f"🚀 Jito Engine: Initialized on {'DEVNET' if is_devnet else 'MAINNET'} endpoint.")
+        logging.info(f"🚀 Jito Engine: Initialized with {len(self.endpoints)} endpoints ({'DEVNET' if is_devnet else 'MAINNET'}).")
 
         # Jito Tip Accounts
         if is_devnet:
@@ -52,18 +61,23 @@ class JitoClient:
         }
 
         async with httpx.AsyncClient() as client:
-            try:
-                response = await client.post(self.endpoint, json=payload)
-                result = response.json()
-                if "result" in result:
-                    logging.info(f"Jito Bundle sent successfully: {result['result']}")
-                    return result["result"]
-                else:
-                    logging.error(f"Jito Bundle failed: {result}")
-                    return None
-            except Exception as e:
-                logging.error(f"Error sending Jito bundle: {e}")
-                return None
+            for endpoint in self.endpoints:
+                try:
+                    response = await client.post(endpoint, json=payload, timeout=5.0)
+                    result = response.json()
+                    if "result" in result:
+                        logging.info(f"🚀 Jito Bundle sent via {endpoint}: {result['result']}")
+                        return result["result"]
+                    elif "error" in result:
+                        err = result["error"]
+                        if err.get("code") == -32097: # Rate limit
+                            logging.warning(f"⚠️ Jito {endpoint} rate limited. Trying next...")
+                            continue
+                        logging.error(f"❌ Jito {endpoint} error: {err}")
+                except Exception as e:
+                    logging.error(f"Error sending to Jito {endpoint}: {e}")
+            
+            return None
 
     def get_random_tip_account(self):
         import random
