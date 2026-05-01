@@ -153,20 +153,42 @@ class HoneyPotManager:
         """Identifies the victim and triggers an immediate counter-sweep."""
         signature = result.get('value', {}).get('signature')
         
-        # 0. Whitelist check (Prevent self-triggering)
+        # 0. Fast Signature Whitelist
         if signature and SignatureRegistry().is_whitelisted(signature):
             logging.info(f"✅ Friendly Fire Prevented: Ignoring own transaction {signature[:10]}...")
             return
-
+            
         logs = result.get('value', {}).get('logs', [])
-        logging.warning(f"🎯 THREAT DETECTED: Activity on Monitored Fleet! Sig: {signature}")
+        logging.info(f"🔍 Analyzing transaction: {signature}")
         
+        sender = None
+        # 0.5 Deep Sender Check (Fetch transaction to see who sent it)
+        try:
+            tx_info = await self.solana_client.client.get_transaction(
+                signature, 
+                max_supported_transaction_version=0
+            )
+            if tx_info and tx_info.value:
+                keys = tx_info.value.transaction.transaction.message.account_keys
+                sender = str(keys[0])
+                
+                if sender == config.SAFE_WALLET_ADDRESS:
+                    logging.info(f"✅ Friendly Fire Prevented: Transaction from GLOBAL SAFE WALLET.")
+                    return
+        except Exception as e:
+            logging.error(f"Error fetching tx info for whitelist check: {e}")
+
         # Trigger Global Panic for all users associated with this activity
-        # (Optimized: In production, we'd map the specific wallet to the user_id)
         users = await self.db.get_all_user_states()
         for u in users:
             user = dict(u)
             user_id = str(user['user_id'])
+            user_safe = user.get('safe_wallet_address')
+            
+            if sender and user_safe and sender == user_safe:
+                logging.info(f"✅ Friendly Fire Prevented: Transaction from User {user_id}'s SAFE WALLET.")
+                continue
+
             if user.get('auto_defense'):
                 # 1. Send Immediate Alert
                 from services.notification_service import NotificationService
