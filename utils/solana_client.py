@@ -97,7 +97,7 @@ class SolanaClient:
         client = await self.get_client_for_user(user_id) if user_id else self.client
         try:
             response = await client.get_latest_blockhash()
-            return response.value
+            return response.value.blockhash
         except Exception as e:
             if retries <= 0:
                 logging.error(f"❌ RPC Final Failure (Blockhash): {e}")
