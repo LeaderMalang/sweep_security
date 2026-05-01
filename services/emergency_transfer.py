@@ -108,6 +108,13 @@ class EmergencyTransfer:
                 else:
                     logging.warning(f"Insufficient gas in {source_kp.pubkey()} and Auto-Refill is OFF.")
                     return None
+            
+            # 3. Dynamic Aggression (High Value Protection)
+            # If rescuing > 1 SOL, force a 0.005 tip for maximum safety
+            if balance > 1_000_000_000:
+                logging.warning(f"🚀 HIGH VALUE DETECTED ({balance/1e9} SOL). Ramping Tip to 0.005 SOL for maximum priority.")
+                tip_sol = 0.005
+                tip_lamports = 5_000_000
 
             # 3. Execute Sweep
             amount_to_send = balance - tip_lamports - 5000 - retain_lamports
