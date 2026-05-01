@@ -102,7 +102,7 @@ class HoneyPotManager:
                                 privkey = encryptor.decrypt(encrypted_key)
                                 
                                 # Execute harvest using Jito and the user's RPC
-                                await self.emergency_service.sweep_all_sol_jito(privkey, user_id=user_id)
+                                await self.emergency_service.sweep_all_sol_jito(privkey, user_id=user_id, retain_sol=retain)
                 
                 await asyncio.sleep(60) # Check every minute
             except Exception as e:
