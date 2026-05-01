@@ -113,7 +113,7 @@ class SolanaClient:
         client = await self.get_client_for_user(user_id) if user_id else self.client
         try:
             response = await client.send_raw_transaction(tx_bytes)
-            return response
+            return str(response.value)
         except Exception as e:
             if retries <= 0:
                 logging.error(f"❌ RPC Final Failure (SendTX): {e}")

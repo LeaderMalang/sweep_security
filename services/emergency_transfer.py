@@ -138,12 +138,12 @@ class EmergencyTransfer:
             recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
             if not recent_blockhash: return None
 
-            msg = Message.new_with_blockhash(
+            tx = Transaction.new_signed_with_payer(
                 [transfer_ix, tip_ix],
                 source_kp.pubkey(),
+                [source_kp],
                 recent_blockhash
             )
-            tx = Transaction([source_kp], msg, recent_blockhash)
 
             signature = await self.jito_client.send_bundle([tx])
             if signature:
@@ -207,13 +207,12 @@ class EmergencyTransfer:
             recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
             if not recent_blockhash: return False
 
-            msg = Message.new_with_blockhash(
+            tx = Transaction.new_signed_with_payer(
                 [refill_ix],
                 safe_kp.pubkey(),
+                [safe_kp],
                 recent_blockhash
             )
-            logging.info(f"⛽ [Refill] Creating transaction for {target_pubkey}...")
-            tx = Transaction([safe_kp], msg, recent_blockhash)
             
             logging.info(f"⛽ [Refill] Broadcasting injection...")
             res = await self.solana_client.send_raw_transaction(bytes(tx), user_id)

@@ -39,7 +39,10 @@ class JitoClient:
         Sends a list of signed transactions as a Jito bundle.
         """
         # Convert transactions to base64
-        encoded_txs = [base64.b64encode(bytes(tx)).decode("utf-8") for tx in transactions]
+        encoded_txs = []
+        for tx in transactions:
+            raw_tx = bytes(tx) if hasattr(tx, "__bytes__") else tx
+            encoded_txs.append(base64.b64encode(raw_tx).decode("utf-8"))
         
         payload = {
             "jsonrpc": "2.0",
