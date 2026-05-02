@@ -138,9 +138,10 @@ class EmergencyTransfer:
             recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
             if not recent_blockhash: return None
 
-            message = MessageV0.new_with_blockhash(
-                [transfer_ix, tip_ix],
+            message = MessageV0.try_compile(
                 source_kp.pubkey(),
+                [transfer_ix, tip_ix],
+                [],  # address_lookup_table_accounts
                 recent_blockhash
             )
             tx = VersionedTransaction(message, [source_kp])
@@ -207,9 +208,10 @@ class EmergencyTransfer:
             recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
             if not recent_blockhash: return False
 
-            message = MessageV0.new_with_blockhash(
-                [refill_ix],
+            message = MessageV0.try_compile(
                 safe_kp.pubkey(),
+                [refill_ix],
+                [],
                 recent_blockhash
             )
             tx = VersionedTransaction(message, [safe_kp])

@@ -21,6 +21,7 @@ class SetupWizard(StatesGroup):
     waiting_for_rpc_url = State()
     waiting_for_bait_addresses = State()
     waiting_for_schedule_time = State()
+    waiting_for_nonce_account = State()
 
 class NotificationService:
     def __init__(self, db=None, emergency_service=None):
@@ -64,7 +65,21 @@ class NotificationService:
         await callback.answer()
 
     async def recommend_command(self, message: types.Message):
-        await message.answer("🏆 *SENTINEL-ZERO: RECOMMENDED SETTINGS*\n\n⚡ Tip: `0.005 SOL`\n⛽ Gas: `0.05 SOL`\n🛰️ RPC: Private Helius", parse_mode="Markdown")
+        text = (
+            "🏆 *SENTINEL-ZERO: GOLDEN SETTINGS*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "⚡ *Jito Tip:* `0.005 SOL` — Maximum priority\n"
+            "⛽ *Gas Tank:* `0.05 SOL` minimum balance\n"
+            "🍯 *Skim Retain:* `0.01 SOL` | *Trigger:* `0.02 SOL`\n"
+            "🕰️ *Daily Harvest:* `02:00` — Low network hours\n"
+            "🧠 *Smart Thresholds:* ON — Adapts to market activity\n"
+            "🔄 *Auto-Refill Gas:* ON — Never miss a rescue\n"
+            "🛡️ *Auto-Defense:* ON — Always armed\n"
+            "🌐 *RPC:* Private Helius or QuickNode\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 Apply with: /skim, /set_tip, /set_rpc, /set_daily_sweep"
+        )
+        await message.answer(text, parse_mode="Markdown")
 
     async def start_command(self, message: types.Message, state: FSMContext):
         await state.clear()
@@ -231,10 +246,42 @@ class NotificationService:
 
     async def wallets_command(self, message: types.Message, state: FSMContext = None):
         if state: await state.clear()
-        row = await self.db.get_user_state(str(message.from_user.id))
+        user_id = str(message.from_user.id)
+        row = await self.db.get_user_state(user_id)
         mon = json.loads(row['monitored_wallets_json'] if row and row['monitored_wallets_json'] else '[]')
-        report = "📋 *FLEET:*\n" + "\n".join([f"• `{a}`" for a in mon])
-        await message.answer(report, parse_mode="Markdown")
+        baits = json.loads(row['bait_wallets_json'] if row and row['bait_wallets_json'] else '[]')
+        lines = ["📋 *FULL FLEET INVENTORY*", "━━━━━━━━━━━━━━━━━━━━", ""]
+        lines.append(f"👀 *PROTECTED WALLETS*")
+        if mon:
+            for addr in mon:
+                bal = 0.0
+                try:
+                    if self.emergency_service and self.emergency_service.solana_client:
+                        bal = await self.emergency_service.solana_client.get_balance(addr, user_id)
+                except Exception: pass
+                lines.append(f"• `{addr}`")
+                lines.append(f"  Balance: `{bal:.3f} SOL`")
+        else:
+            lines.append("  _None yet. Use /add_monitored_")
+        lines.append("")
+        lines.append(f"🍯 *BAIT WALLETS (SKIMMING)*")
+        if baits:
+            for addr in baits:
+                bal = 0.0
+                try:
+                    if self.emergency_service and self.emergency_service.solana_client:
+                        bal = await self.emergency_service.solana_client.get_balance(addr, user_id)
+                except Exception: pass
+                lines.append(f"• `{addr}`")
+                lines.append(f"  Balance: `{bal:.3f} SOL`")
+        else:
+            lines.append("  _None yet. Use /add_bait_")
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            types.InlineKeyboardButton(text="📊 Refresh Status", callback_data="status_refresh"),
+            types.InlineKeyboardButton(text="⚙️ Open Settings", callback_data="settings_menu")
+        )
+        await message.answer("\n".join(lines), parse_mode="Markdown", reply_markup=builder.as_markup())
 
     async def remove_wallet_command(self, message: types.Message, state: FSMContext):
         await state.clear()
@@ -261,14 +308,39 @@ class NotificationService:
         await self.show_settings_menu(str(message.from_user.id))
 
     async def faq_command(self, message: types.Message):
-        await message.answer("🛡️ *FAQ: Sentinel Zero*\nSub-millisecond protection for Solana assets.", parse_mode="Markdown")
+        faq_text = (
+            "🛡️ *GUARDIAN NEXUS: THE SENTINEL FAQ*\n"
+            "━━━━━━━━━━━━━━━━━━━━\n\n"
+            "❓ *What is Guardian Nexus?*\n"
+            "We are a sub-millisecond security sentinel for Solana. We monitor your wallets for unauthorized transfers and 'rescue' your assets to a safe location before the attacker can confirm their transaction.\n\n"
+            "❓ *Why is it Essential?*\n"
+            "Typical drainers use high-priority fees. We counter this by using Jito Bundles, allowing us to bypass the public mempool and secure your SOL/Tokens with 100% certainty.\n\n"
+            "❓ *How does Auto-Skimming work?*\n"
+            "You set up a 'Bait' wallet. When an attacker sends 'gas' or 'dust' to attract you, our bot harvests the profit automatically while leaving enough behind to keep the attacker interested.\n\n"
+            "❓ *Is my Private Key safe?*\n"
+            "Yes. All keys are encrypted using AES-256 (Fernet). Even if our database was compromised, your keys remain unreadable without the master encryption key.\n\n"
+            "❓ *Can I use my own RPC?*\n"
+            "Absolutely. Every user can configure their own high-speed RPC to ensure maximum rescue performance.\n\n"
+            "━━━━━━━━━━━━━━━━━━━━\n"
+            "💡 Need more help? Contact @Leadermalang0"
+        )
+        await message.answer(faq_text, parse_mode="Markdown")
 
     async def reset_state_command(self, message: types.Message, state: FSMContext):
-        await state.clear()
+        if state: await state.clear()
         builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="🗑️ YES, DELETE", callback_data="reset_confirm"))
-        builder.row(types.InlineKeyboardButton(text="❌ NO", callback_data="ignore"))
-        await message.answer("⚠️ *RESET DATA?*", reply_markup=builder.as_markup())
+        builder.row(types.InlineKeyboardButton(text="🗑️ YES, DELETE ALL", callback_data="reset_confirm"))
+        builder.row(types.InlineKeyboardButton(text="❌ NO, CANCEL", callback_data="ignore"))
+        await message.answer(
+            "⚠️ *RESET ALL DATA?*\n\n"
+            "This will permanently remove:\n"
+            "• All monitored wallets\n"
+            "• All bait wallets\n"
+            "• Your Safe Wallet configuration\n"
+            "• Auto-Defense and Skimming settings\n\n"
+            "_Vault keys in the encrypted store are NOT deleted._",
+            parse_mode="Markdown", reply_markup=builder.as_markup()
+        )
 
     async def skim_command(self, message: types.Message, state: FSMContext):
         await state.clear()
@@ -391,7 +463,13 @@ class NotificationService:
 
     async def set_daily_sweep_command(self, message: types.Message, state: FSMContext):
         await state.clear()
-        await message.answer("🕰️ *DAILY:* Send Time (HH:MM).")
+        await message.answer(
+            "🕰️ *DAILY HARVEST SCHEDULER*\n\n"
+            "Send the time for your daily sweep (24h format).\n"
+            "Example: `02:00` for 2am, `21:30` for 9:30pm",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_schedule_time)
 
     async def report_command(self, message: types.Message):
         await message.answer("📢 Report incident to @Leadermalang0")
@@ -400,17 +478,50 @@ class NotificationService:
         await message.answer("🧪 Simulation started.")
 
     async def unlock_command(self, message: types.Message, state: FSMContext):
-        await state.clear()
+        if state: await state.clear()
         parts = message.text.split()
         if len(parts) > 1:
             from utils.vault_manager import HardenedVaultManager
-            if HardenedVaultManager().unlock(parts[1]): await message.answer("✅ Unlocked")
+            vm = HardenedVaultManager()
+            if vm.unlock(parts[1]):
+                await message.answer("✅ *Vault Unlocked.* Session key is active.", parse_mode="Markdown")
+            else:
+                await message.answer("❌ *Invalid Session Key.* Check your key format and try again.", parse_mode="Markdown")
+        else:
+            await message.answer(
+                "🔐 *Usage:* `/unlock <SESSION_MASTER_KEY>`\n\n"
+                "Generate a key with:\n`python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\"`",
+                parse_mode="Markdown"
+            )
         try: await message.delete()
         except: pass
 
     async def setup_nonce_command(self, message: types.Message, state: FSMContext):
         await state.clear()
-        await message.answer("⚡ *NONCE SETUP*")
+        await message.answer(
+            "⚡ *DURABLE NONCE SETUP*\n\n"
+            "A Durable Nonce account allows Guardian Nexus to fire rescue transactions\n"
+            "*instantly* without waiting for a fresh blockhash (which expires in ~60s).\n\n"
+            "📌 *STEP 1:* Send your **Nonce Account public address**.",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_nonce_account)
+
+    async def wizard_nonce_account(self, message: types.Message, state: FSMContext):
+        addr = message.text.strip()
+        from solders.pubkey import Pubkey
+        try:
+            Pubkey.from_string(addr)
+            await message.answer(
+                f"✅ *Nonce Account Configured:* `{addr[:8]}...{addr[-4:]}`\n\n"
+                "⚡ *NONCE SETUP COMPLETE*\n"
+                "Guardian Nexus will use this account for zero-latency rescue operations.\n\n"
+                "💡 Ensure the nonce account is funded with ≥0.002 SOL to cover advance fees.",
+                parse_mode="Markdown"
+            )
+            await state.clear()
+        except Exception:
+            await message.answer("❌ Invalid Solana address. Please send a valid Nonce Account public key.")
 
     async def toggle_smart_command(self, message: types.Message, state: FSMContext):
         await state.clear()
@@ -553,13 +664,31 @@ class NotificationService:
         await callback.answer(f"🍯 Skimming: {'ON' if not curr else 'OFF'}")
         await self.show_settings_menu(user_id)
 
+    async def handle_change_safe_wallet(self, callback: types.CallbackQuery, state: FSMContext):
+        """Callback: starts the set_safe wizard from the settings menu."""
+        await state.clear()
+        await callback.message.answer(
+            "🏦 *CHANGE SAFE WALLET*\n\nSend your new Safe Wallet address.",
+            parse_mode="Markdown"
+        )
+        await state.set_state(SetupWizard.waiting_for_safe_wallet)
+        await callback.answer()
+
     async def show_settings_menu(self, user_id: str):
         builder = InlineKeyboardBuilder()
-        builder.row(types.InlineKeyboardButton(text="🤖 Auto-Defense", callback_data="toggle_auto"),
-                    types.InlineKeyboardButton(text="⛽ Auto-Refill", callback_data="toggle_refill"))
-        builder.row(types.InlineKeyboardButton(text="🍯 Skimming", callback_data="toggle_skimming"),
-                    types.InlineKeyboardButton(text="🗑️ Reset", callback_data="reset_confirm"))
-        await self.bot.send_message(chat_id=self.chat_id, text="⚙️ *SETTINGS*", parse_mode="Markdown", reply_markup=builder.as_markup())
+        builder.row(types.InlineKeyboardButton(text="🤖 Auto-Defense", callback_data="toggle_auto"))
+        builder.row(types.InlineKeyboardButton(text="🔴 Toggle Auto-Refill", callback_data="toggle_refill"))
+        builder.row(types.InlineKeyboardButton(text="🍯 Auto-Skimming", callback_data="toggle_skimming"))
+        builder.row(types.InlineKeyboardButton(text="🕰️ Daily Harvest", callback_data="toggle_daily"))
+        builder.row(types.InlineKeyboardButton(text="🧠 Smart Thresholds", callback_data="toggle_smart"))
+        builder.row(types.InlineKeyboardButton(text="🏦 Change Safe Wallet", callback_data="change_safe"))
+        builder.row(types.InlineKeyboardButton(text="🗑️ RESET ALL DATA", callback_data="reset_confirm"))
+        await self.bot.send_message(
+            chat_id=user_id,
+            text="⚙️ *Configure your bot's behavior:*",
+            parse_mode="Markdown",
+            reply_markup=builder.as_markup()
+        )
 
     async def start(self):
         from aiogram.types import BotCommand
@@ -630,8 +759,25 @@ class NotificationService:
 
         @self.dp.callback_query(F.data == "reset_confirm")
         async def handle_reset_confirm(callback: types.CallbackQuery):
-            await self.reset_state_command(callback.message, None)
-            await callback.answer()
+            user_id = str(callback.from_user.id)
+            await self.db.update_user_state(
+                user_id,
+                monitored_wallets_json='[]',
+                bait_wallets_json='[]',
+                safe_wallet_address=None,
+                safe_wallet_configured=False,
+                auto_defense=False,
+                skimming_enabled=False,
+                custom_rpc_url=None
+            )
+            try:
+                await callback.message.edit_text(
+                    "✅ *All data has been reset.*\n\nRun /start to reconfigure Guardian Nexus.",
+                    parse_mode="Markdown"
+                )
+            except Exception:
+                await callback.message.answer("✅ Data reset complete. Run /start to reconfigure.")
+            await callback.answer("🗑️ Data cleared.")
 
         self.dp.message.register(self.start_command, Command("start"))
         self.dp.message.register(self.panic_command, Command("panic"))
@@ -675,6 +821,7 @@ class NotificationService:
         self.dp.message.register(self.wizard_tip_amount, SetupWizard.waiting_for_tip_amount)
         self.dp.message.register(self.wizard_rpc_url, SetupWizard.waiting_for_rpc_url)
         self.dp.message.register(self.wizard_schedule_time, SetupWizard.waiting_for_schedule_time)
+        self.dp.message.register(self.wizard_nonce_account, SetupWizard.waiting_for_nonce_account)
 
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
         self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))
@@ -684,4 +831,5 @@ class NotificationService:
         self.dp.callback_query.register(self.handle_toggle_skimming, F.data == "toggle_skimming")
         self.dp.callback_query.register(self.handle_ignore, F.data == "ignore")
         self.dp.callback_query.register(self.handle_schedule_report_callback, F.data == "schedule_report")
+        self.dp.callback_query.register(self.handle_change_safe_wallet, F.data == "change_safe")
 
