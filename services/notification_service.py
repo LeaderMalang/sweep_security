@@ -914,12 +914,12 @@ class NotificationService:
                 await callback.answer(f"⏳ Cooldown: {remaining}s remaining.", show_alert=True)
                 return
             self._panic_last_used[user_id] = time.time()
-            if target == "all":
-                await callback.message.answer("🚀 *GLOBAL PANIC:* Sweeping...")
-                if self.emergency_service: await self.emergency_service.execute_all(user_id)
-            else:
-                await callback.message.answer(f"🚀 Sweeping {target}...")
-                if self.emergency_service: await self.emergency_service.execute_all(user_id)
+            await callback.message.answer("🚀 *GLOBAL PANIC:* Sweeping...", parse_mode="Markdown")
+            if self.emergency_service:
+                success = await self.emergency_service.execute_all(user_id)
+                await callback.message.answer(
+                    "✅ Sweep complete." if success else "❌ Sweep failed. Check vault status with /unlock."
+                )
             await callback.answer()
 
         @self.dp.callback_query(F.data == "toggle_auto")

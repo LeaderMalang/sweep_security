@@ -19,6 +19,7 @@ class EmergencyTransfer:
         self.jito_client = jito_client or JitoClient()
         self.db = db
         self.safe_wallet = Pubkey.from_string(config.SAFE_WALLET_ADDRESS) if config.SAFE_WALLET_ADDRESS else None
+        self._gas_lock = asyncio.Lock()  # prevents concurrent refills from the same safe wallet
 
     async def _decrypt_wallet_key(self, wallet_address: str) -> str | None:
         """
@@ -64,13 +65,12 @@ class EmergencyTransfer:
 
         wallets = json.loads(state["monitored_wallets_json"])
         tasks = []
-        retain = state.get("skimming_retain", 0.0)
 
         for address in wallets:
             privkey = await self._decrypt_wallet_key(address)
             if privkey:
                 tasks.append(
-                    self.sweep_all_sol_jito(privkey, user_id=user_id, db=db, retain_sol=retain)
+                    self.sweep_all_sol_jito(privkey, user_id=user_id, db=db, retain_sol=0.0)
                 )
             else:
                 logging.error(f"Could not decrypt key for {address}. Skipping.")
@@ -217,11 +217,15 @@ class EmergencyTransfer:
             # ── Attempt Jito Bundle (tip only paid if this succeeds) ─────────
             bundle_id = await self.jito_client.send_bundle([jito_tx])
             if bundle_id:
-                logging.info(f"🚀 Jito Bundle submitted! Tip: {tip_sol} SOL. Bundle: {bundle_id} | TX: {actual_tx_sig}")
-                return actual_tx_sig
+                logging.info(f"🚀 Jito Bundle submitted! Bundle: {bundle_id} | TX: {actual_tx_sig}")
+                confirmed = await self._await_bundle_confirmation(bundle_id)
+                if confirmed:
+                    logging.info(f"✅ Jito Bundle confirmed on-chain. TX: {actual_tx_sig}")
+                    return actual_tx_sig
+                logging.warning("⚠️ Jito bundle not confirmed within timeout. Falling back to RPC...")
 
             # ── Fallback: Standard RPC — NO tip sent ────────────────────────
-            logging.warning("⚠️ Jito Bundle failed. Falling back to tip-free standard RPC broadcast...")
+            logging.warning("⚠️ Falling back to tip-free standard RPC broadcast...")
             signature = await self.solana_client.send_raw_transaction(bytes(fallback_tx), user_id)
             if signature:
                 SignatureRegistry().register(signature)
@@ -236,60 +240,82 @@ class EmergencyTransfer:
             if user_id and client != self.solana_client.client:
                 await client.close()
 
+    async def _await_bundle_confirmation(self, bundle_id: str, timeout_secs: int = 20) -> bool:
+        """Polls getBundleStatuses every 1.5s until confirmed/finalized or timeout."""
+        import time
+        deadline = time.monotonic() + timeout_secs
+        while time.monotonic() < deadline:
+            await asyncio.sleep(1.5)
+            try:
+                statuses = await self.jito_client.get_bundle_statuses([bundle_id])
+                for s in statuses:
+                    if s.get("bundle_id") == bundle_id:
+                        status = s.get("confirmation_status", "")
+                        if status in ("confirmed", "finalized"):
+                            return True
+                        err = s.get("err")
+                        if err and err not in (None, {"Ok": None}):
+                            logging.error(f"Jito bundle error: {err}")
+                            return False
+            except Exception as e:
+                logging.warning(f"Bundle status poll error: {e}")
+        logging.warning(f"Jito bundle {bundle_id[:16]}... timed out after {timeout_secs}s.")
+        return False
+
     async def _inject_gas(self, target_pubkey, user_id, db):
-        """Sends a small amount of SOL from the safe wallet to the target."""
-        try:
-            # 1. Try to get user's personal gas key first
-            row = await db.get_user_state(user_id)
-            state = dict(row) if row else {}
-            user_safe_addr = state.get('safe_wallet_address')
-            
-            privkey = None
-            if user_safe_addr:
-                encrypted_key = await db.get_vault_key(user_safe_addr)
-                if encrypted_key:
-                    from utils.encryption_utils import EncryptionManager
-                    encryptor = EncryptionManager(config.ENCRYPTION_KEY)
-                    privkey = encryptor.decrypt(encrypted_key).strip()
+        """Sends a small amount of SOL from the safe wallet to the target.
+        Serialized via _gas_lock to prevent concurrent refills from the same source wallet."""
+        async with self._gas_lock:
+            try:
+                # 1. Try to get user's personal gas key first
+                row = await db.get_user_state(user_id)
+                state = dict(row) if row else {}
+                user_safe_addr = state.get('safe_wallet_address')
 
-            # 2. Fallback to System Global Key
-            if not privkey:
-                privkey = config.SAFE_WALLET_PRIVATE_KEY.strip()
-            
-            if not privkey:
-                logging.error("No gas source (user or global) available for refill.")
-                return False
+                privkey = None
+                if user_safe_addr:
+                    encrypted_key = await db.get_vault_key(user_safe_addr)
+                    if encrypted_key:
+                        from utils.encryption_utils import EncryptionManager
+                        encryptor = EncryptionManager(config.ENCRYPTION_KEY)
+                        privkey = encryptor.decrypt(encrypted_key).strip()
 
-            safe_kp = Keypair.from_base58_string(privkey)
-            # 2.5 Balance Check for Gas Source
-            balance = await self.solana_client.get_balance(safe_kp.pubkey(), user_id)
-            if balance < 0.006: # 0.005 + fee
-                logging.error(f"❌ GAS TANK EMPTY: {safe_kp.pubkey()} only has {balance} SOL. Please fund it for Auto-Refill.")
-                return False
+                # 2. Fallback to System Global Key
+                if not privkey:
+                    raw = config.SAFE_WALLET_PRIVATE_KEY  # may be None if not set in .env
+                    privkey = raw.strip() if raw else None
 
-            # Inject 0.007 SOL (enough for high-priority tips + fees)
-            refill_ix = transfer(TransferParams(
-                from_pubkey=safe_kp.pubkey(),
-                to_pubkey=target_pubkey,
-                lamports=7_000_000 
-            ))
-            recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
-            if not recent_blockhash: return False
+                if not privkey:
+                    logging.error("No gas source (user or global) available for refill.")
+                    return False
 
-            message = MessageV0.try_compile(
-                safe_kp.pubkey(),
-                [refill_ix],
-                [],
-                recent_blockhash
-            )
-            tx = VersionedTransaction(message, [safe_kp])
-            
-            logging.info(f"⛽ [Refill] Broadcasting injection...")
-            res = await self.solana_client.send_raw_transaction(bytes(tx), user_id)
-            if res:
+                safe_kp = Keypair.from_base58_string(privkey)
+                balance = await self.solana_client.get_balance(safe_kp.pubkey(), user_id)
+                if balance < 0.006:
+                    logging.error(f"❌ GAS TANK EMPTY: {safe_kp.pubkey()} only has {balance} SOL.")
+                    return False
+
+                # Inject 0.007 SOL (covers high-priority tip + base fee)
+                refill_ix = transfer(TransferParams(
+                    from_pubkey=safe_kp.pubkey(),
+                    to_pubkey=target_pubkey,
+                    lamports=7_000_000
+                ))
+                recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
+                if not recent_blockhash:
+                    return False
+
+                message = MessageV0.try_compile(safe_kp.pubkey(), [refill_ix], [], recent_blockhash)
+                tx = VersionedTransaction(message, [safe_kp])
+
+                logging.info(f"⛽ [Refill] Broadcasting injection to {target_pubkey}...")
+                res = await self.solana_client.send_raw_transaction(bytes(tx), user_id)
+                if not res:
+                    logging.error(f"⛽ Gas injection TX rejected by RPC for user {user_id}.")
+                    return False
                 SignatureRegistry().register(res)
-            logging.info(f"⛽ Gas Injected for user {user_id}: {res}")
-            return True
-        except Exception as e:
-            logging.error(f"Gas Injection Error: {e}")
-            return False
+                logging.info(f"⛽ Gas injected for user {user_id}: {res}")
+                return True
+            except Exception as e:
+                logging.error(f"Gas Injection Error: {e}")
+                return False

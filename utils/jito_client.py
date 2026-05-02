@@ -79,6 +79,26 @@ class JitoClient:
             
             return None
 
+    async def get_bundle_statuses(self, bundle_ids: list) -> list:
+        """Returns status objects for the given bundle IDs. Empty list on failure."""
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getBundleStatuses",
+            "params": [bundle_ids]
+        }
+        async with httpx.AsyncClient() as client:
+            for endpoint in self.endpoints:
+                try:
+                    response = await client.post(endpoint, json=payload, timeout=5.0)
+                    result = response.json()
+                    if "result" in result:
+                        value = result["result"].get("value") or []
+                        return value
+                except Exception as e:
+                    logging.warning(f"getBundleStatuses error on {endpoint}: {e}")
+        return []
+
     def get_random_tip_account(self):
         import random
         return Pubkey.from_string(random.choice(self.tip_accounts))

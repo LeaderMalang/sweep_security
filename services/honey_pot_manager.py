@@ -17,38 +17,45 @@ class HoneyPotManager:
         self.active_websocket = None
 
     async def run_daily_harvest(self):
-        """Executes a total harvest for all users once per day at their configured time."""
-        logging.info("🕰️ Chronos Engine: Active and Scheduling Daily Harvests...")
+        """Executes a total harvest for all users once per day at their configured UTC time."""
+        logging.info("🕰️ Chronos Engine: Active and Scheduling Daily Harvests (UTC)...")
         while True:
             try:
-                now = datetime.now()
+                from datetime import timezone
+                now = datetime.now(timezone.utc)
                 now_str = now.strftime("%H:%M")
                 today_str = now.strftime("%Y-%m-%d")
-                
+
                 users = await self.db.get_all_user_states()
                 for user_row in users:
                     user = dict(user_row)
                     user_id = str(user['user_id'])
-                    
+
                     if not user.get('daily_sweep_enabled'):
                         continue
-                    
-                    # Check if it's the right time and we haven't harvested today
+
                     if user.get('daily_sweep_time') == now_str and self.last_harvests.get(user_id) != today_str:
                         logging.warning(f"🕰️ CHRONOS TRIGGER: Starting scheduled harvest for User {user_id}")
                         self.last_harvests[user_id] = today_str
-                        
-                        # Get ONLY bait wallets for daily harvest — never sweep monitored/protected wallets
+
+                        # Bait wallets only — never touch monitored/protected wallets
                         baits = json.loads(user.get('bait_wallets_json', '[]') or '[]')
                         safe_addr = (user.get('safe_wallet_address') or '').strip()
+                        retain = user.get('skimming_retain', 0.01)
                         all_fleet = [w.strip() for w in baits if w.strip() and w.strip() != safe_addr]
-                        
+
+                        # Gather sweep tasks concurrently
+                        sweep_tasks = []
                         for wallet in all_fleet:
                             privkey = await self.emergency_service._decrypt_wallet_key(wallet)
                             if privkey and self.emergency_service:
-                                await self.emergency_service.sweep_all_sol_jito(privkey, user_id=user_id)
-                
-                await asyncio.sleep(30) # Check twice per minute for precision
+                                sweep_tasks.append(
+                                    self.emergency_service.sweep_all_sol_jito(privkey, user_id=user_id, retain_sol=retain)
+                                )
+                        if sweep_tasks:
+                            await asyncio.gather(*sweep_tasks, return_exceptions=True)
+
+                await asyncio.sleep(30)  # Check twice per minute for precision
             except Exception as e:
                 logging.error(f"Chronos Engine Error: {e}")
                 await asyncio.sleep(10)
@@ -74,7 +81,8 @@ class HoneyPotManager:
                     
                     # Ensure threshold is sane (min 0.001 SOL)
                     threshold = max(threshold, 0.001)
-                    logging.info(f"🧠 SMART MODE: Active threshold {threshold} for User {user_id}")
+                    if user.get('smart_thresholds_enabled'):
+                        logging.info(f"🧠 SMART MODE: Active threshold {threshold} for User {user_id}")
 
                     retain = user['skimming_retain']
                     bait_wallets = json.loads(user.get('bait_wallets_json', '[]') or '[]')
@@ -119,18 +127,21 @@ class HoneyPotManager:
         """Internal logic for a single WebSocket session."""
         from utils.solana_client import get_atn_headers
         headers = get_atn_headers(config.SOLANA_WSS_URL)
-        
+
         async with websockets.connect(config.SOLANA_WSS_URL, extra_headers=headers) as websocket:
             self.active_websocket = websocket
-            # 1. Subscribe to all relevant wallets
             users = await self.db.get_all_user_states()
             all_wallets = set()
+            wallet_to_user = {}  # wallet_address -> user_id
             for u in users:
                 user = dict(u)
+                uid = str(user['user_id'])
                 baits = json.loads(user.get('bait_wallets_json', '[]') or '[]')
                 monitored = json.loads(user.get('monitored_wallets_json', '[]') or '[]')
                 all_wallets.update(baits)
                 all_wallets.update(monitored)
+                for w in baits + monitored:
+                    wallet_to_user[w] = uid
 
             if not all_wallets:
                 logging.warning("No wallets to monitor. Waiting...")
@@ -149,7 +160,7 @@ class HoneyPotManager:
                 response = await websocket.recv()
                 data = json.loads(response)
                 if "params" in data:
-                    await self.handle_security_event(data["params"]["result"], all_wallets)
+                    await self.handle_security_event(data["params"]["result"], wallet_to_user)
 
     async def trigger_reconnect(self):
         """Forces the watchtower to reconnect and refresh its wallet subscription list."""
@@ -158,61 +169,82 @@ class HoneyPotManager:
             await self.active_websocket.close()
             self.active_websocket = None
 
-    async def handle_security_event(self, result, monitored_list):
-        """Identifies the victim and triggers an immediate counter-sweep."""
+    async def handle_security_event(self, result, wallet_to_user: dict):
+        """Identifies the affected wallet's owner and triggers a sweep only for that user."""
         signature = result.get('value', {}).get('signature')
-        
-        # 0. Fast Signature Whitelist
+
+        # Fast signature whitelist check
         if signature and SignatureRegistry().is_whitelisted(signature):
-            logging.info(f"✅ Friendly Fire Prevented: Ignoring own transaction {signature[:10]}...")
+            logging.info(f"✅ Friendly Fire Prevented: {signature[:10]}...")
             return
-            
+
         logs = result.get('value', {}).get('logs', [])
-        logging.info(f"🔍 Analyzing transaction: {signature}")
-        
+        logging.info(f"🔍 Sentinel analyzing TX: {signature}")
+
+        # Identify which subscribed wallet was involved
+        target_wallet = None
+        for log_line in logs:
+            for wallet in wallet_to_user:
+                if wallet in log_line:
+                    target_wallet = wallet
+                    break
+            if target_wallet:
+                break
+
+        if not target_wallet:
+            # Fallback: scan full result string
+            result_str = str(result)
+            for wallet in wallet_to_user:
+                if wallet in result_str:
+                    target_wallet = wallet
+                    break
+
+        if not target_wallet:
+            logging.debug("Sentinel: could not identify affected wallet from event. Skipping.")
+            return
+
+        affected_user_id = wallet_to_user.get(target_wallet)
+        if not affected_user_id:
+            return
+
+        # Fetch sender for friendly-fire checks
         sender = None
-        # 0.5 Deep Sender Check (Fetch transaction to see who sent it)
         try:
             tx_info = await self.solana_client.client.get_transaction(
-                signature, 
-                max_supported_transaction_version=0
+                signature, max_supported_transaction_version=0
             )
             if tx_info and tx_info.value:
                 keys = tx_info.value.transaction.transaction.message.account_keys
                 sender = str(keys[0])
-                
-                if sender == config.SAFE_WALLET_ADDRESS:
-                    logging.info(f"✅ Friendly Fire Prevented: Transaction from GLOBAL SAFE WALLET.")
-                    return
         except Exception as e:
-            logging.error(f"Error fetching tx info for whitelist check: {e}")
+            logging.error(f"Error fetching TX for friendly-fire check: {e}")
 
-        # Trigger Global Panic for all users associated with this activity
-        users = await self.db.get_all_user_states()
-        for u in users:
-            user = dict(u)
-            user_id = str(user['user_id'])
-            user_safe = user.get('safe_wallet_address')
-            
-            if sender and user_safe and sender == user_safe:
-                logging.info(f"✅ Friendly Fire Prevented: Transaction from User {user_id}'s SAFE WALLET.")
-                continue
+        # Global safe wallet guard
+        if sender and sender == config.SAFE_WALLET_ADDRESS:
+            logging.info("✅ Friendly Fire Prevented: TX from GLOBAL SAFE WALLET.")
+            return
 
-            if user.get('auto_defense'):
-                # 1. Send Immediate Alert
-                from services.notification_service import NotificationService
-                ns = self.emergency_service.notification_service if hasattr(self.emergency_service, 'notification_service') else None
-                if ns:
-                    await ns.send_threat_alert(
-                        wallet_address="Monitored Fleet",
-                        score=100,
-                        reasons=["🚨 UNAUTHORIZED TRANSFER DETECTED"],
-                        tx_hash=signature,
-                        user_id=user_id
-                    )
-                
-                # 2. Trigger Global Rescue
-                await self.emergency_service.execute_all(user_id)
+        # Per-user safe wallet guard
+        user_row = await self.db.get_user_state(affected_user_id)
+        if not user_row:
+            return
+        user = dict(user_row)
+        user_safe = user.get('safe_wallet_address')
+        if sender and user_safe and sender == user_safe:
+            logging.info(f"✅ Friendly Fire Prevented: TX from User {affected_user_id}'s SAFE WALLET.")
+            return
+
+        if user.get('auto_defense'):
+            ns = self.emergency_service.notification_service if hasattr(self.emergency_service, 'notification_service') else None
+            if ns:
+                await ns.send_threat_alert(
+                    wallet_address=target_wallet,
+                    score=100,
+                    reasons=["🚨 UNAUTHORIZED TRANSFER DETECTED"],
+                    tx_hash=signature,
+                    user_id=affected_user_id
+                )
+            await self.emergency_service.execute_all(affected_user_id)
 
     async def broadcast_threat(self, address):
         """Simulates broadcasting threat intelligence to a central network."""

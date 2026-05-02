@@ -46,36 +46,42 @@ class SolanaClient:
         self.pool = SolanaConnectionPool()
         self.wss_url = config.SOLANA_WSS_URL
         self.db = db
+        self._custom_clients: dict = {}  # url -> AsyncClient (cached to avoid per-call leaks)
 
     @property
     def client(self):
         return self.pool.get_client()
 
     async def get_client_for_user(self, user_id: str):
-        """Returns a custom AsyncClient if the user has one, otherwise the pool client."""
+        """Returns a custom AsyncClient if the user has one, otherwise the pool client.
+        Custom RPC clients are cached per URL to avoid creating a new connection on every call."""
         if self.db:
             row = await self.db.get_user_state(user_id)
             if not row: return self.client
             state = dict(row)
 
-            # 1. Check for Custom RPC first (By-pass usage tracking)
+            # 1. Check for Custom RPC first (bypass usage tracking)
             if state.get('custom_rpc_url'):
                 url = state['custom_rpc_url']
-                return AsyncClient(url, extra_headers=get_atn_headers(url))
+                if url not in self._custom_clients:
+                    self._custom_clients[url] = AsyncClient(url, extra_headers=get_atn_headers(url))
+                return self._custom_clients[url]
 
-            # Track RPC usage for ALL users using our system RPCs (Free, Lite, Pro, Admin)
+            # Track RPC usage for users on our system RPC
             await self.db.increment_rpc_usage(user_id)
 
-            # 2. Using System RPC (Pro/Lite/Admin)
+            # 2. System RPC (Pro/Lite/Admin)
             tier = state.get('subscription_tier', 'free').lower()
             is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
-            
+
             if is_admin or tier in ['lite', 'pro', 'premium']:
                 return self.client
-        
-        # 3. Free Tier Fallback (Use first configured RPC - respects .env)
+
+        # 3. Free Tier Fallback
         url = config.SOLANA_RPC_URLS[0]
-        return AsyncClient(url, extra_headers=get_atn_headers(url))
+        if url not in self._custom_clients:
+            self._custom_clients[url] = AsyncClient(url, extra_headers=get_atn_headers(url))
+        return self._custom_clients[url]
 
     async def get_balance(self, address: str, user_id: str = None, retries: int = 3) -> float:
         """Gets balance for an address with retry/backoff logic."""
@@ -144,38 +150,43 @@ class SolanaClient:
             return await self.send_raw_transaction(tx_bytes, user_id, retries - 1)
 
     async def get_priority_fee_estimate(self, user_id: str = None, retries: int = 2):
-        """Fetches dynamic priority fee from Helius to beat network congestion."""
+        """Fetches dynamic priority fee using the standard getRecentPrioritizationFees RPC method.
+        Works on all RPC providers (Helius, QuickNode, Alchemy, public mainnet-beta).
+        Returns an estimated Jito tip in SOL, or None on failure."""
         client = await self.get_client_for_user(user_id) if user_id else self.client
         try:
             import httpx
-            # Example Helius RPC payload for priority fee estimation
             payload = {
                 "jsonrpc": "2.0",
                 "id": 1,
-                "method": "getPriorityFeeEstimate",
-                "params": [{
-                    "options": {
-                        "priorityLevel": "Extreme"
-                    }
-                }]
+                "method": "getRecentPrioritizationFees",
+                "params": []
             }
-            # Note: We send directly to the endpoint configured in the client
-            url = client._provider.endpoint_uri
+            url = str(client._provider.endpoint_uri)
             async with httpx.AsyncClient() as http_client:
-                headers = {"Content-Type": "application/json"}
-                res = await http_client.post(url, json=payload, headers=headers, timeout=5.0)
+                res = await http_client.post(
+                    url, json=payload,
+                    headers={"Content-Type": "application/json"},
+                    timeout=5.0
+                )
                 data = res.json()
-                if "result" in data and "priorityFeeEstimate" in data["result"]:
-                    # returned in micro-lamports, convert to lamports (roughly / 1M, but Jito tips need whole lamports)
-                    # For safety, if API returns lamports, we cap it between 0.0001 and 0.05 SOL
-                    est = float(data["result"]["priorityFeeEstimate"]) / 1e9 # assume lamports returned, convert to SOL
-                    return max(0.0001, min(est * 1.5, 0.05)) # Pad by 1.5x for safety
+                if "result" in data and isinstance(data["result"], list) and data["result"]:
+                    # Each entry: {"slot": N, "prioritizationFee": M} where M is µlamports/CU
+                    fees = [e["prioritizationFee"] for e in data["result"] if e.get("prioritizationFee", 0) > 0]
+                    if fees:
+                        fees.sort()
+                        # Use the 75th-percentile fee as the network congestion signal
+                        p75_microlamports_per_cu = fees[int(len(fees) * 0.75)]
+                        # Scale to a Jito tip in SOL:
+                        # typical transfer = ~200 CU; µlamps/CU → lamports → SOL
+                        # multiply by 1.5x safety buffer, cap between 0.0001 and 0.05 SOL
+                        estimated_sol = p75_microlamports_per_cu * 200 / 1e6 / 1e9
+                        return max(0.0001, min(estimated_sol * 1.5, 0.05))
         except Exception as e:
             if retries <= 0:
                 logging.error(f"❌ RPC Priority Fee Error: {e}")
                 return None
-            wait_time = (3 - retries) * 1.0 
-            await asyncio.sleep(wait_time)
+            await asyncio.sleep((3 - retries) * 1.0)
             await self.pool.rotate_endpoint()
             return await self.get_priority_fee_estimate(user_id, retries - 1)
         return None
@@ -183,3 +194,6 @@ class SolanaClient:
     async def close(self):
         for client in self.pool.clients:
             await client.close()
+        for client in self._custom_clients.values():
+            await client.close()
+        self._custom_clients.clear()
