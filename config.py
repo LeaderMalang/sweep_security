@@ -32,6 +32,9 @@ SAFE_WALLET_PRIVATE_KEY = os.getenv("SAFE_WALLET_PRIVATE_KEY")
 EVM_SAFE_ADDRESS = os.getenv("EVM_SAFE_ADDRESS")
 ENCRYPTION_KEY = os.getenv("ENCRYPTION_KEY")
 
+# Anthropic API key for AI-driven forensic reports (optional — template fallback used if unset)
+AI_API_KEY = os.getenv("AI_API_KEY", "")
+
 # API Security — must be set in production; dashboard requests must include X-API-Key header
 API_SECRET_KEY = os.getenv("API_SECRET_KEY", "")
 
