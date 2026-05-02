@@ -10,7 +10,7 @@ class WalletMonitor:
     def __init__(self, threat_detector, notification_service, db=None, emergency_service=None):
         self.threat_detector = threat_detector
         self.notification_service = notification_service
-        self.solana_client = SolanaClient()
+        self.solana_client = SolanaClient(db=db)
         self.monitored_wallets = config.MONITORED_WALLETS
         self.db = db
         self.emergency_service = emergency_service

@@ -55,7 +55,6 @@ class Database:
                     skimming_retain REAL DEFAULT 0.01,
                     custom_rpc_url TEXT,
                     bait_wallets_json TEXT DEFAULT '[]',
-                    subscription_tier TEXT DEFAULT 'free',
                     subscription_expiry DATETIME,
                     rpc_usage_count INTEGER DEFAULT 0
                 )
