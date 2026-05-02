@@ -138,6 +138,12 @@ class EmergencyTransfer:
                 from_pubkey=source_kp.pubkey(), to_pubkey=destination, lamports=fallback_amount
             ))
 
+            # ── Fetch blockhash (used by both Jito and fallback TX) ──────────
+            recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
+            if not recent_blockhash:
+                logging.error("Could not fetch blockhash. Aborting sweep.")
+                return None
+
             # ── Build RPC Fallback TX (no tip — only the sweep) ─────────────
             fallback_message = MessageV0.try_compile(
                 source_kp.pubkey(),

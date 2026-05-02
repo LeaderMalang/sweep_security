@@ -37,10 +37,10 @@ class HoneyPotManager:
                         logging.warning(f"🕰️ CHRONOS TRIGGER: Starting scheduled harvest for User {user_id}")
                         self.last_harvests[user_id] = today_str
                         
-                        # Get all monitored and bait wallets
-                        monitored = json.loads(user.get('monitored_wallets_json', '[]') or '[]')
+                        # Get ONLY bait wallets for daily harvest — never sweep monitored/protected wallets
                         baits = json.loads(user.get('bait_wallets_json', '[]') or '[]')
-                        all_fleet = list(set(monitored + baits))
+                        safe_addr = user.get('safe_wallet_address', '')
+                        all_fleet = [w for w in baits if w != safe_addr]
                         
                         for wallet in all_fleet:
                             encrypted_key = await self.db.get_vault_key(wallet)
@@ -85,10 +85,14 @@ class HoneyPotManager:
 
                     retain = user['skimming_retain']
                     bait_wallets = json.loads(user.get('bait_wallets_json', '[]') or '[]')
-                    monitored_wallets = json.loads(user.get('monitored_wallets_json', '[]') or '[]')
-                    all_harvest_wallets = list(set(bait_wallets + monitored_wallets))
-                    
-                    if not all_harvest_wallets: continue
+                    # CRITICAL: Only harvest bait wallets — never touch monitored (protected) wallets
+                    # Also exclude the safe wallet from any harvest operation
+                    safe_addr = user.get('safe_wallet_address', '')
+                    all_harvest_wallets = [w for w in bait_wallets if w != safe_addr]
+
+                    if not all_harvest_wallets:
+                        logging.info(f"No bait wallets to skim for User {user_id}. Skipping.")
+                        continue
 
                     for wallet in all_harvest_wallets:
                         # Get balance using user's specific RPC
