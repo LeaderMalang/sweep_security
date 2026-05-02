@@ -7,6 +7,7 @@ load_dotenv()
 rpc_env = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
 SOLANA_RPC_URLS = [url.strip() for url in rpc_env.split(",") if url.strip()]
 SOLANA_WSS_URL = os.getenv("SOLANA_WSS_URL", "wss://api.mainnet-beta.solana.com")
+SHREDSTREAM_URL = os.getenv("SHREDSTREAM_URL", "")
 
 # EVM Configuration (Ethereum, BSC, Base)
 EVM_RPC_URLS = {
