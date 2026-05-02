@@ -57,7 +57,7 @@ class JitoClient:
             "jsonrpc": "2.0",
             "id": 1,
             "method": "sendBundle",
-            "params": [encoded_txs]
+            "params": [encoded_txs, {"encoding": "base64"}]
         }
 
         async with httpx.AsyncClient() as client:

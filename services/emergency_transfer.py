@@ -121,43 +121,58 @@ class EmergencyTransfer:
                 tip_sol = 0.005
                 tip_lamports = 5_000_000
 
-            # 3. Execute Sweep
-            amount_to_send = balance_lamports - tip_lamports - 5000 - retain_lamports
-            if amount_to_send <= 0:
-                logging.warning(f"Amount to send ({amount_to_send}) is zero or negative. Skipping.")
+            # 3. Build sweep amounts
+            # Jito path: deduct tip + tx fee + retain
+            jito_amount = balance_lamports - tip_lamports - 5000 - retain_lamports
+            # RPC fallback path: deduct only tx fee + retain (no tip wasted)
+            fallback_amount = balance_lamports - 5000 - retain_lamports
+
+            if jito_amount <= 0:
+                logging.warning(f"Amount to send ({jito_amount}) is zero or negative. Skipping.")
                 return None
 
             transfer_ix = transfer(TransferParams(
-                from_pubkey=source_kp.pubkey(), to_pubkey=destination, lamports=amount_to_send
+                from_pubkey=source_kp.pubkey(), to_pubkey=destination, lamports=jito_amount
             ))
+            fallback_transfer_ix = transfer(TransferParams(
+                from_pubkey=source_kp.pubkey(), to_pubkey=destination, lamports=fallback_amount
+            ))
+
+            # ── Build RPC Fallback TX (no tip — only the sweep) ─────────────
+            fallback_message = MessageV0.try_compile(
+                source_kp.pubkey(),
+                [fallback_transfer_ix],
+                [],
+                recent_blockhash
+            )
+            fallback_tx = VersionedTransaction(fallback_message, [source_kp])
+
+            # ── Build Jito Bundle TX (sweep + tip — atomic together) ─────────
             tip_account = self.jito_client.get_random_tip_account()
             tip_ix = transfer(TransferParams(
                 from_pubkey=source_kp.pubkey(), to_pubkey=tip_account, lamports=tip_lamports
             ))
-
-            recent_blockhash = await self.solana_client.get_latest_blockhash(user_id)
-            if not recent_blockhash: return None
-
-            message = MessageV0.try_compile(
+            jito_message = MessageV0.try_compile(
                 source_kp.pubkey(),
                 [transfer_ix, tip_ix],
-                [],  # address_lookup_table_accounts
+                [],
                 recent_blockhash
             )
-            tx = VersionedTransaction(message, [source_kp])
+            jito_tx = VersionedTransaction(jito_message, [source_kp])
 
-            signature = await self.jito_client.send_bundle([tx])
+            # ── Attempt Jito Bundle (tip only paid if this succeeds) ─────────
+            signature = await self.jito_client.send_bundle([jito_tx])
             if signature:
                 SignatureRegistry().register(signature)
-                logging.info(f"🚀 Rescue Bundle Sent! Tip: {tip_sol} SOL. Sig: {signature}")
+                logging.info(f"🚀 Jito Bundle confirmed! Tip: {tip_sol} SOL paid atomically. Sig: {signature}")
                 return signature
-            
-            # FALLBACK: If Jito fails, send via regular RPC
-            logging.warning("⚠️ Jito Bundle failed. Falling back to standard RPC broadcast...")
-            signature = await self.solana_client.send_raw_transaction(bytes(tx), user_id)
+
+            # ── Fallback: Standard RPC — NO tip sent ────────────────────────
+            logging.warning("⚠️ Jito Bundle failed. Falling back to tip-free standard RPC broadcast...")
+            signature = await self.solana_client.send_raw_transaction(bytes(fallback_tx), user_id)
             if signature:
                 SignatureRegistry().register(signature)
-                logging.info(f"✅ Fallback Sweep Success! Sig: {signature}")
+                logging.info(f"✅ Fallback Sweep Success! (No Jito tip paid) Sig: {signature}")
                 return signature
 
             return None
