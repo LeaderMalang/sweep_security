@@ -92,6 +92,9 @@ class NotificationService:
         await message.answer("🛡️ *GUARDIAN NEXUS ACTIVE*", parse_mode="Markdown", reply_markup=self.get_dashboard_markup())
 
     async def wizard_safe_wallet(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         address = message.text.strip()
         from solders.pubkey import Pubkey
         try:
@@ -102,6 +105,9 @@ class NotificationService:
         except: await message.answer("❌ Invalid Solana Address.")
 
     async def wizard_monitored_wallet(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         raw_input = message.text.replace(",", " ").split()
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
@@ -122,22 +128,42 @@ class NotificationService:
         else: await message.answer("❌ No valid wallets added.")
 
     async def wizard_vault_key(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         raw_keys = message.text.replace(",", " ").split()
         from solders.keypair import Keypair
         from utils.encryption_utils import EncryptionManager
         encryptor = EncryptionManager(config.ENCRYPTION_KEY)
-        count = 0
+        success_count = 0
+        fail_count = 0
         for priv in raw_keys:
             try:
                 kp = Keypair.from_base58_string(priv)
                 addr = str(kp.pubkey())
                 await self.db.store_vault_key(addr, encryptor.encrypt(priv))
-                count += 1
-            except: pass
-        await message.answer(f"🔐 Linked `{count}` keys. 🛡️ Arm Auto-Defense?", reply_markup=self.get_yes_no_keyboard("toggle_auto_wizard"))
+                success_count += 1
+            except:
+                fail_count += 1
+                
+        msg = f"🔐 Linked `{success_count}` keys."
+        if fail_count > 0:
+            msg += f"\n⚠️ `{fail_count}` keys failed validation and were skipped."
+        msg += "\n🛡️ Arm Auto-Defense?"
+        
+        await message.answer(msg, reply_markup=self.get_yes_no_keyboard("toggle_auto_wizard"))
         try: await message.delete()
         except: pass
         await state.clear()
+
+    async def cancel_command(self, message: types.Message, state: FSMContext):
+        """Globally cancel any active wizard."""
+        current_state = await state.get_state()
+        if current_state is None:
+            await message.answer("ℹ️ No active setup wizard to cancel.")
+            return
+        await state.clear()
+        await message.answer("🛑 Setup wizard cancelled. You can now use other commands.")
 
     async def panic_command(self, message: types.Message):
         user_id = str(message.from_user.id)
@@ -289,6 +315,9 @@ class NotificationService:
         await state.set_state(SetupWizard.waiting_for_remove_wallet)
 
     async def wizard_remove_wallet(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         addr = message.text.strip()
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
@@ -297,6 +326,8 @@ class NotificationService:
             mon.remove(addr)
             await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(mon))
             await self.db.delete_vault_key(addr)
+            if hasattr(self, 'honey_pot_manager'):
+                await self.honey_pot_manager.trigger_reconnect()
             await message.answer(f"✅ Removed `{addr[:8]}...`")
         await state.clear()
 
@@ -348,6 +379,9 @@ class NotificationService:
         await state.set_state(SetupWizard.waiting_for_skim_retain)
 
     async def wizard_skim_retain(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         try:
             val = float(message.text.strip())
             await state.update_data(skim_retain=val)
@@ -356,6 +390,9 @@ class NotificationService:
         except: await message.answer("❌ Invalid number.")
 
     async def wizard_skim_threshold(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         try:
             val = float(message.text.strip())
             data = await state.get_data()
@@ -365,9 +402,15 @@ class NotificationService:
         except: await message.answer("❌ Invalid number.")
 
     async def wizard_skim_addresses(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         await self.wizard_bait_addresses(message, state)
 
     async def wizard_bait_addresses(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         raw = message.text.replace(",", " ").split()
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
@@ -393,6 +436,9 @@ class NotificationService:
         await state.set_state(SetupWizard.waiting_for_rpc_url)
 
     async def wizard_rpc_url(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         url = message.text.strip()
         if url.startswith("http"):
             await self.db.update_user_state(str(message.from_user.id), custom_rpc_url=url)
@@ -401,6 +447,9 @@ class NotificationService:
         else: await message.answer("❌ Invalid URL.")
 
     async def wizard_vault_address(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         addr = message.text.strip()
         from solders.pubkey import Pubkey
         try:
@@ -411,6 +460,9 @@ class NotificationService:
         except: await message.answer("❌ Invalid Address.")
 
     async def wizard_gas_key(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         priv = message.text.strip()
         from solders.keypair import Keypair
         try:
@@ -425,6 +477,9 @@ class NotificationService:
         except: await message.answer("❌ Invalid Private Key.")
 
     async def wizard_tip_amount(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         try:
             val = float(message.text.strip())
             await self.db.update_user_state(str(message.from_user.id), jito_tip_sol=val)
@@ -508,6 +563,9 @@ class NotificationService:
         await state.set_state(SetupWizard.waiting_for_nonce_account)
 
     async def wizard_nonce_account(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         addr = message.text.strip()
         from solders.pubkey import Pubkey
         try:
@@ -597,6 +655,9 @@ class NotificationService:
         await state.set_state(SetupWizard.waiting_for_schedule_time)
 
     async def wizard_schedule_time(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
         import re
         time_str = message.text.strip()
         if re.match(r'^([01]\d|2[0-3]):[0-5]\d$', time_str):
@@ -802,8 +863,8 @@ class NotificationService:
         self.dp.message.register(self.toggle_smart_command, Command("toggle_smart"))
         self.dp.message.register(self.unlock_command, Command("unlock"))
         self.dp.message.register(self.setup_nonce_command, Command("setup_nonce"))
-        self.dp.message.register(self.cancel_command, Command("cancel"))
         self.dp.message.register(self.reset_state_command, Command("reset_state"))
+        self.dp.message.register(self.cancel_command, Command("cancel"), StateFilter("*"))
         self.dp.message.register(self.report_command, Command("report"))
         self.dp.message.register(self.test_attack_command, Command("test_attack"))
         self.dp.message.register(self.schedule_report_command, Command("schedule_report"))

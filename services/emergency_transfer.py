@@ -75,6 +75,13 @@ class EmergencyTransfer:
         state = await db.get_user_state(user_id) if db else {}
         state = dict(state) if state else {}
         tip_sol = state.get('jito_tip_sol', 0.001)
+        
+        # --- Dynamic Fee Escalation ---
+        dynamic_tip = await self.solana_client.get_priority_fee_estimate(user_id)
+        if dynamic_tip and dynamic_tip > tip_sol:
+            logging.info(f"📈 Dynamic Fee Escalation: Scaling tip from {tip_sol} to {dynamic_tip:.6f} SOL based on network congestion.")
+            tip_sol = dynamic_tip
+
         tip_lamports = int(tip_sol * 1_000_000_000)
         auto_refill = state.get('auto_refill_gas', 1)
         retain_lamports = int(retain_sol * 1_000_000_000)

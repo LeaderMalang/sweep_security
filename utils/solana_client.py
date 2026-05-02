@@ -63,12 +63,14 @@ class SolanaClient:
                 url = state['custom_rpc_url']
                 return AsyncClient(url, extra_headers=get_atn_headers(url))
 
+            # Track RPC usage for ALL users using our system RPCs (Free, Lite, Pro, Admin)
+            await self.db.increment_rpc_usage(user_id)
+
             # 2. Using System RPC (Pro/Lite/Admin)
             tier = state.get('subscription_tier', 'free').lower()
             is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
             
             if is_admin or tier in ['lite', 'pro', 'premium']:
-                await self.db.increment_rpc_usage(user_id)
                 return self.client
         
         # 3. Free Tier Fallback (Use first configured RPC - respects .env)
@@ -140,6 +142,43 @@ class SolanaClient:
             await asyncio.sleep(wait_time)
             await self.pool.rotate_endpoint()
             return await self.send_raw_transaction(tx_bytes, user_id, retries - 1)
+
+    async def get_priority_fee_estimate(self, user_id: str = None, retries: int = 2):
+        """Fetches dynamic priority fee from Helius to beat network congestion."""
+        client = await self.get_client_for_user(user_id) if user_id else self.client
+        try:
+            import httpx
+            # Example Helius RPC payload for priority fee estimation
+            payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "getPriorityFeeEstimate",
+                "params": [{
+                    "options": {
+                        "priorityLevel": "Extreme"
+                    }
+                }]
+            }
+            # Note: We send directly to the endpoint configured in the client
+            url = client._provider.endpoint_uri
+            async with httpx.AsyncClient() as http_client:
+                headers = {"Content-Type": "application/json"}
+                res = await http_client.post(url, json=payload, headers=headers, timeout=5.0)
+                data = res.json()
+                if "result" in data and "priorityFeeEstimate" in data["result"]:
+                    # returned in micro-lamports, convert to lamports (roughly / 1M, but Jito tips need whole lamports)
+                    # For safety, if API returns lamports, we cap it between 0.0001 and 0.05 SOL
+                    est = float(data["result"]["priorityFeeEstimate"]) / 1e9 # assume lamports returned, convert to SOL
+                    return max(0.0001, min(est * 1.5, 0.05)) # Pad by 1.5x for safety
+        except Exception as e:
+            if retries <= 0:
+                logging.error(f"❌ RPC Priority Fee Error: {e}")
+                return None
+            wait_time = (3 - retries) * 1.0 
+            await asyncio.sleep(wait_time)
+            await self.pool.rotate_endpoint()
+            return await self.get_priority_fee_estimate(user_id, retries - 1)
+        return None
 
     async def close(self):
         for client in self.pool.clients:

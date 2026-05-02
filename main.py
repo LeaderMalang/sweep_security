@@ -35,7 +35,7 @@ async def main():
     # 1. Initialize Core Infrastructure
     db = Database()
     await db.connect()
-    solana_client = SolanaClient()
+    solana_client = SolanaClient(db=db)
     jito_client = JitoClient()
     vault = HardenedVaultManager()
     
@@ -55,6 +55,7 @@ async def main():
     notification_service = NotificationService(db=db)
     mempool_watcher.threat_detector = threat_detector
     mempool_watcher.notification_service = notification_service
+    mempool_watcher.db = db
     hygiene_manager = HygieneManager(db=db, notification_service=notification_service)
     gas_tank = GasTankManager(solana_client)
     
@@ -65,6 +66,7 @@ async def main():
     wallet_monitor = WalletMonitor(threat_detector, notification_service, db, emergency_service)
     evm_monitor = EVMMonitor(threat_detector, notification_service)
     honey_pot_manager = HoneyPotManager(db=db, threat_detector=threat_detector, emergency_service=emergency_service)
+    notification_service.honey_pot_manager = honey_pot_manager
 
     # 6. Start API Bridge (Phase 34)
     from api.server import app, state as api_state

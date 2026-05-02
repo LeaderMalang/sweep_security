@@ -45,8 +45,22 @@ class MempoolWatcher:
 
     async def _analyze_pending_tx(self, tx_data):
         """Intercepts and counters attacks BEFORE inclusion."""
+        # 1. Fetch dynamic monitored addresses from DB
+        monitored_addresses = set()
+        if hasattr(self, 'db') and self.db:
+            users = await self.db.get_all_user_states()
+            for u in users:
+                user = dict(u)
+                mon = json.loads(user.get('monitored_wallets_json', '[]') or '[]')
+                monitored_addresses.update(mon)
+        else:
+            monitored_addresses = set(self.monitored_addresses)
+
+        if not monitored_addresses:
+            return
+
         # Heuristic check for monitored address involvement
-        if any(addr in str(tx_data) for addr in self.monitored_addresses):
+        if any(addr in str(tx_data) for addr in monitored_addresses):
             score = await self.threat_detector.analyze_transaction(tx_data)
             
             if score >= 90:

@@ -14,6 +14,7 @@ class HoneyPotManager:
         self.emergency_service = emergency_service
         self.solana_client = emergency_service.solana_client if emergency_service else None
         self.last_harvests = {} # user_id -> date_string
+        self.active_websocket = None
 
     async def run_daily_harvest(self):
         """Executes a total harvest for all users once per day at their configured time."""
@@ -134,6 +135,7 @@ class HoneyPotManager:
         headers = get_atn_headers(config.SOLANA_WSS_URL)
         
         async with websockets.connect(config.SOLANA_WSS_URL, extra_headers=headers) as websocket:
+            self.active_websocket = websocket
             # 1. Subscribe to all relevant wallets
             users = await self.db.get_all_user_states()
             all_wallets = set()
@@ -162,6 +164,13 @@ class HoneyPotManager:
                 data = json.loads(response)
                 if "params" in data:
                     await self.handle_security_event(data["params"]["result"], all_wallets)
+
+    async def trigger_reconnect(self):
+        """Forces the watchtower to reconnect and refresh its wallet subscription list."""
+        if self.active_websocket:
+            logging.info("🔄 Watchtower: Dynamic reconnect triggered (Subscription list updated).")
+            await self.active_websocket.close()
+            self.active_websocket = None
 
     async def handle_security_event(self, result, monitored_list):
         """Identifies the victim and triggers an immediate counter-sweep."""
