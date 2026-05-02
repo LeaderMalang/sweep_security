@@ -1,7 +1,11 @@
 import asyncio
 import logging
 from web3 import Web3, AsyncWeb3
+from web3.middleware import ExtraDataToPOAMiddleware
 import config
+
+# Networks that use PoA / non-standard extraData (Parlia, Clique, etc.)
+_POA_NETWORKS = {"bsc", "polygon", "base"}
 
 class EVMMonitor:
     def __init__(self, threat_detector, notification_service, db=None):
@@ -10,10 +14,12 @@ class EVMMonitor:
         self.db = db
         self.monitored_wallets = config.EVM_WALLETS
         self.networks = config.EVM_RPC_URLS
-        self.connections = {
-            name: AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(url))
-            for name, url in self.networks.items()
-        }
+        self.connections = {}
+        for name, url in self.networks.items():
+            w3 = AsyncWeb3(AsyncWeb3.AsyncHTTPProvider(url))
+            if name.lower() in _POA_NETWORKS:
+                w3.middleware_onion.inject(ExtraDataToPOAMiddleware, layer=0)
+            self.connections[name] = w3
         # wallet → user_id mapping, populated from DB on start
         self.wallet_to_user: dict = {}
 
