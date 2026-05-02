@@ -40,16 +40,12 @@ class HoneyPotManager:
                         
                         # Get ONLY bait wallets for daily harvest — never sweep monitored/protected wallets
                         baits = json.loads(user.get('bait_wallets_json', '[]') or '[]')
-                        safe_addr = user.get('safe_wallet_address', '')
-                        all_fleet = [w for w in baits if w != safe_addr]
+                        safe_addr = (user.get('safe_wallet_address') or '').strip()
+                        all_fleet = [w.strip() for w in baits if w.strip() and w.strip() != safe_addr]
                         
                         for wallet in all_fleet:
-                            encrypted_key = await self.db.get_vault_key(wallet)
-                            if encrypted_key and self.emergency_service:
-                                from utils.encryption_utils import EncryptionManager
-                                encryptor = EncryptionManager(config.ENCRYPTION_KEY)
-                                privkey = encryptor.decrypt(encrypted_key)
-                                # Total harvest to safe wallet
+                            privkey = await self.emergency_service._decrypt_wallet_key(wallet)
+                            if privkey and self.emergency_service:
                                 await self.emergency_service.sweep_all_sol_jito(privkey, user_id=user_id)
                 
                 await asyncio.sleep(30) # Check twice per minute for precision
@@ -62,11 +58,7 @@ class HoneyPotManager:
         logging.info("🍯 Skimmer Engine: Active and Monitoring all users...")
         while True:
             try:
-                # 1. Fetch all users
-                all_users = await self.db.get_all_user_states()
-                
                 users = await self.db.get_all_user_states()
-                
                 for user_row in users:
                     user = dict(user_row)
                     if not user['skimming_enabled']:
@@ -87,9 +79,8 @@ class HoneyPotManager:
                     retain = user['skimming_retain']
                     bait_wallets = json.loads(user.get('bait_wallets_json', '[]') or '[]')
                     # CRITICAL: Only harvest bait wallets — never touch monitored (protected) wallets
-                    # Also exclude the safe wallet from any harvest operation
-                    safe_addr = user.get('safe_wallet_address', '')
-                    all_harvest_wallets = [w for w in bait_wallets if w != safe_addr]
+                    safe_addr = (user.get('safe_wallet_address') or '').strip()
+                    all_harvest_wallets = [w.strip() for w in bait_wallets if w.strip() and w.strip() != safe_addr]
 
                     if not all_harvest_wallets:
                         logging.info(f"No bait wallets to skim for User {user_id}. Skipping.")
@@ -102,13 +93,8 @@ class HoneyPotManager:
                         if balance >= (threshold + 0.01) and balance > 0:
                             logging.warning(f"🍯 HARVEST DETECTED for User {user_id}: {wallet} balance ({balance}) hits threshold ({threshold})")
                             
-                            encrypted_key = await self.db.get_vault_key(wallet)
-                            if encrypted_key and self.emergency_service:
-                                from utils.encryption_utils import EncryptionManager
-                                encryptor = EncryptionManager(config.ENCRYPTION_KEY)
-                                privkey = encryptor.decrypt(encrypted_key)
-                                
-                                # Execute harvest using Jito and the user's RPC
+                            privkey = await self.emergency_service._decrypt_wallet_key(wallet)
+                            if privkey and self.emergency_service:
                                 await self.emergency_service.sweep_all_sol_jito(privkey, user_id=user_id, retain_sol=retain)
                 
                 await asyncio.sleep(60) # Check every minute
@@ -221,7 +207,8 @@ class HoneyPotManager:
                         wallet_address="Monitored Fleet",
                         score=100,
                         reasons=["🚨 UNAUTHORIZED TRANSFER DETECTED"],
-                        tx_hash=signature
+                        tx_hash=signature,
+                        user_id=user_id
                     )
                 
                 # 2. Trigger Global Rescue

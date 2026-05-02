@@ -5,8 +5,10 @@ import logging
 class EncryptionManager:
     def __init__(self, key_str):
         """
-        Uses Fernet (AES-128 in CBC mode with HMAC) for simple, secure encryption.
-        key_str must be a URL-safe base64-encoded 32-byte key.
+        Uses Fernet symmetric encryption (AES-128-CBC + HMAC-SHA256).
+        key_str must be a URL-safe base64-encoded 32-byte key (generate with Fernet.generate_key()).
+        Note: Fernet uses AES-128, not AES-256. Use for background/static key operations only;
+        prefer HardenedVaultManager for interactive sessions.
         """
         try:
             # Ensure the key is in the correct format for Fernet

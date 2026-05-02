@@ -87,7 +87,16 @@ class Database:
             try:
                 await db.execute("ALTER TABLE user_state ADD COLUMN smart_thresholds_enabled BOOLEAN DEFAULT FALSE")
             except Exception: pass
-            
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN nonce_account TEXT")
+            except Exception: pass
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN daily_report_enabled BOOLEAN DEFAULT FALSE")
+            except Exception: pass
+            try:
+                await db.execute("ALTER TABLE user_state ADD COLUMN daily_report_time TEXT DEFAULT '08:00'")
+            except Exception: pass
+
             await db.commit()
             await db.execute("""
                 CREATE TABLE IF NOT EXISTS wallet_vault (
@@ -166,10 +175,12 @@ class Database:
             await db.commit()
 
     async def add_to_blacklist(self, address, reason):
+        # Lowercase EVM addresses; preserve Solana case sensitivity
+        normalized = address.lower() if address.startswith('0x') else address.strip()
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 "INSERT OR IGNORE INTO blacklist (address, reason) VALUES (?, ?)",
-                (address.lower(), reason)
+                (normalized, reason)
             )
             await db.commit()
 
@@ -187,9 +198,14 @@ class Database:
                 rows = await cursor.fetchall()
                 return [row[0] for row in rows]
 
-    async def get_history(self, limit=5):
+    async def get_history(self, limit=5, wallet_addresses=None):
         async with aiosqlite.connect(self.db_path) as db:
             db.row_factory = aiosqlite.Row
+            if wallet_addresses:
+                placeholders = ",".join("?" * len(wallet_addresses))
+                query = f"SELECT * FROM threat_logs WHERE wallet_address IN ({placeholders}) ORDER BY timestamp DESC LIMIT ?"
+                async with db.execute(query, wallet_addresses + [limit]) as cursor:
+                    return await cursor.fetchall()
             async with db.execute("SELECT * FROM threat_logs ORDER BY timestamp DESC LIMIT ?", (limit,)) as cursor:
                 return await cursor.fetchall()
 

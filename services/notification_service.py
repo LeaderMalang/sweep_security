@@ -22,14 +22,18 @@ class SetupWizard(StatesGroup):
     waiting_for_bait_addresses = State()
     waiting_for_schedule_time = State()
     waiting_for_nonce_account = State()
+    waiting_for_report_time = State()
 
 class NotificationService:
+    _PANIC_COOLDOWN_SECONDS = 30
+
     def __init__(self, db=None, emergency_service=None):
         self.bot = Bot(token=config.TELEGRAM_BOT_TOKEN)
         self.dp = Dispatcher()
         self.chat_id = config.TELEGRAM_CHAT_ID
         self.db = db
         self.emergency_service = emergency_service
+        self._panic_last_used: dict = {}  # user_id -> last panic timestamp
         self._register_handlers()
 
     def get_dashboard_markup(self):
@@ -48,7 +52,7 @@ class NotificationService:
 
     async def premium_command(self, message: types.Message):
         user_id = str(message.from_user.id)
-        is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
+        is_admin = user_id in config.ADMIN_CHAT_IDS
         state = await self.db.get_user_state(user_id)
         current_tier = "ADMIN" if is_admin else (state['subscription_tier'].upper() if state else "FREE")
         premium_text = (f"💎 *GUARDIAN NEXUS PREMIUM*\nYour Tier: *{current_tier}*\n\n"
@@ -99,7 +103,20 @@ class NotificationService:
         from solders.pubkey import Pubkey
         try:
             Pubkey.from_string(address)
-            await self.db.update_user_state(str(message.from_user.id), safe_wallet_address=address, safe_wallet_configured=True)
+            user_id = str(message.from_user.id)
+            # Warn if this address already exists in monitored/bait lists (self-sweep loop risk)
+            existing = await self.db.get_user_state(user_id)
+            if existing:
+                s = dict(existing)
+                mon = json.loads(s.get('monitored_wallets_json') or '[]')
+                baits = json.loads(s.get('bait_wallets_json') or '[]')
+                if address in mon or address in baits:
+                    await message.answer(
+                        f"⚠️ *Warning:* `{address[:8]}...` is already in your monitored/bait wallet list.\n"
+                        "With Auto-Defense ON, this can cause a self-sweep loop. Consider using a dedicated safe wallet.",
+                        parse_mode="Markdown"
+                    )
+            await self.db.update_user_state(user_id, safe_wallet_address=address, safe_wallet_configured=True)
             await message.answer(f"✅ *Safe Wallet Saved:* `{address[:8]}...`\n\n👀 *STEP 2:* Send **Wallet Address** to monitor.")
             await state.set_state(SetupWizard.waiting_for_monitored_wallet)
         except: await message.answer("❌ Invalid Solana Address.")
@@ -112,7 +129,9 @@ class NotificationService:
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
         wallets = json.loads(row['monitored_wallets_json'] if row and row['monitored_wallets_json'] else '[]')
+        safe_addr = (dict(row).get('safe_wallet_address') or '') if row else ''
         added = []
+        warned = []
         from solders.pubkey import Pubkey
         for addr in raw_input:
             try:
@@ -120,9 +139,17 @@ class NotificationService:
                 if addr not in wallets:
                     wallets.append(addr)
                     added.append(addr)
+                    if addr == safe_addr:
+                        warned.append(addr)
             except: pass
         if added:
             await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(wallets))
+            if warned:
+                await message.answer(
+                    f"⚠️ *Warning:* `{warned[0][:8]}...` is your Safe Wallet. Adding it to the monitored list "
+                    "can cause a self-sweep loop when Auto-Defense fires.",
+                    parse_mode="Markdown"
+                )
             await message.answer(f"✅ Added `{len(added)}` wallets. 🔐 *STEP 3:* Send **Private Key(s)**.")
             await state.set_state(SetupWizard.waiting_for_vault_key)
         else: await message.answer("❌ No valid wallets added.")
@@ -166,12 +193,24 @@ class NotificationService:
         await message.answer("🛑 Setup wizard cancelled. You can now use other commands.")
 
     async def panic_command(self, message: types.Message):
+        import time
         user_id = str(message.from_user.id)
-        await message.answer("⚠️ *GLOBAL PANIC:* Connecting to Vault...")
+
+        # Rate-limit: one panic per user per cooldown window
+        last = self._panic_last_used.get(user_id, 0)
+        elapsed = time.time() - last
+        if elapsed < self._PANIC_COOLDOWN_SECONDS:
+            remaining = int(self._PANIC_COOLDOWN_SECONDS - elapsed)
+            await message.answer(f"⏳ Panic cooldown active. Try again in {remaining}s.")
+            return
+
+        self._panic_last_used[user_id] = time.time()
+        await message.answer("⚠️ *GLOBAL PANIC:* Connecting to Vault...", parse_mode="Markdown")
         if self.emergency_service:
             success = await self.emergency_service.execute_all(user_id)
-            await message.answer("✅ Success" if success else "❌ Failed")
-        else: await message.answer("❌ Offline")
+            await message.answer("✅ Sweep complete." if success else "❌ Sweep failed. Check vault status with /unlock.")
+        else:
+            await message.answer("❌ Emergency service offline.")
 
     async def vault_command(self, message: types.Message, state: FSMContext):
         await state.clear()
@@ -186,7 +225,7 @@ class NotificationService:
             await message.answer("⚠️ No profile found. Run /start to initialize.")
             return
         s = dict(row)
-        is_admin = user_id == str(config.TELEGRAM_CHAT_ID)
+        is_admin = user_id in config.ADMIN_CHAT_IDS
         tier = "ADMIN" if is_admin else s.get('subscription_tier', 'FREE').upper()
 
         # Wallet data
@@ -321,14 +360,25 @@ class NotificationService:
         addr = message.text.strip()
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
-        mon = json.loads(row['monitored_wallets_json'] if row else '[]')
+        s = dict(row) if row else {}
+        mon = json.loads(s.get('monitored_wallets_json') or '[]')
+        baits = json.loads(s.get('bait_wallets_json') or '[]')
+        removed = False
         if addr in mon:
             mon.remove(addr)
             await self.db.update_user_state(user_id, monitored_wallets_json=json.dumps(mon))
+            removed = True
+        if addr in baits:
+            baits.remove(addr)
+            await self.db.update_user_state(user_id, bait_wallets_json=json.dumps(baits))
+            removed = True
+        if removed:
             await self.db.delete_vault_key(addr)
             if hasattr(self, 'honey_pot_manager'):
                 await self.honey_pot_manager.trigger_reconnect()
             await message.answer(f"✅ Removed `{addr[:8]}...`")
+        else:
+            await message.answer(f"❌ Address not found in any wallet list.")
         await state.clear()
 
     async def health_command(self, message: types.Message, state: FSMContext):
@@ -414,8 +464,12 @@ class NotificationService:
         raw = message.text.replace(",", " ").split()
         user_id = str(message.from_user.id)
         row = await self.db.get_user_state(user_id)
-        baits = json.loads(row['bait_wallets_json'] if row and row['bait_wallets_json'] else '[]')
+        s = dict(row) if row else {}
+        baits = json.loads(s.get('bait_wallets_json') or '[]')
+        safe_addr = (s.get('safe_wallet_address') or '').strip()
+        mon = json.loads(s.get('monitored_wallets_json') or '[]')
         added = []
+        warned = []
         from solders.pubkey import Pubkey
         for addr in raw:
             try:
@@ -423,9 +477,17 @@ class NotificationService:
                 if addr not in baits:
                     baits.append(addr)
                     added.append(addr)
+                    if addr == safe_addr or addr in mon:
+                        warned.append(addr)
             except: pass
         if added:
             await self.db.update_user_state(user_id, bait_wallets_json=json.dumps(baits))
+            if warned:
+                await message.answer(
+                    f"⚠️ *Warning:* `{warned[0][:8]}...` is your Safe/Monitored wallet. "
+                    "Bait wallets are automatically harvested — verify this is intentional.",
+                    parse_mode="Markdown"
+                )
             await message.answer(f"✅ Added `{len(added)}` baits. Send Private Keys.")
             await state.set_state(SetupWizard.waiting_for_vault_key)
         else: await message.answer("❌ No valid addresses.")
@@ -509,7 +571,39 @@ class NotificationService:
 
     async def history_command(self, message: types.Message, state: FSMContext):
         await state.clear()
-        await message.answer("📜 *HISTORY:* No recent threats.")
+        user_id = str(message.from_user.id)
+        row = await self.db.get_user_state(user_id)
+        wallets = []
+        if row:
+            s = dict(row)
+            wallets += json.loads(s.get('monitored_wallets_json') or '[]')
+            wallets += json.loads(s.get('bait_wallets_json') or '[]')
+            if s.get('safe_wallet_address'):
+                wallets.append(s['safe_wallet_address'])
+
+        events = await self.db.get_history(limit=10, wallet_addresses=wallets if wallets else None)
+
+        if not events:
+            await message.answer("📜 *HISTORY:* No threat events recorded yet.", parse_mode="Markdown")
+            return
+
+        lines = ["📜 *RECENT THREAT LOG*", "━━━━━━━━━━━━━━━━━━━━"]
+        for evt in events:
+            e = dict(evt)
+            wallet_short = f"{e['wallet_address'][:8]}..." if e.get('wallet_address') else "Unknown"
+            ts = str(e.get('timestamp', ''))[:16]
+            score = e.get('risk_score', 0)
+            reasons = e.get('reasons', '')
+            sig = str(e.get('signature', ''))
+            sig_short = f"`{sig[:12]}...`" if sig else "N/A"
+            lines.append(f"\n🚨 *{ts}*")
+            lines.append(f"  Wallet: `{wallet_short}`")
+            lines.append(f"  Score: *{score}/100*")
+            if reasons:
+                lines.append(f"  {reasons.split(',')[0][:60]}")
+            lines.append(f"  TX: {sig_short}")
+
+        await message.answer("\n".join(lines), parse_mode="Markdown")
 
     async def set_tip_command(self, message: types.Message, state: FSMContext):
         await state.clear()
@@ -535,10 +629,11 @@ class NotificationService:
     async def unlock_command(self, message: types.Message, state: FSMContext):
         if state: await state.clear()
         parts = message.text.split()
+        user_id = str(message.from_user.id)
         if len(parts) > 1:
             from utils.vault_manager import HardenedVaultManager
             vm = HardenedVaultManager()
-            if vm.unlock(parts[1]):
+            if vm.unlock(parts[1], identifier=user_id):
                 await message.answer("✅ *Vault Unlocked.* Session key is active.", parse_mode="Markdown")
             else:
                 await message.answer("❌ *Invalid Session Key.* Check your key format and try again.", parse_mode="Markdown")
@@ -570,6 +665,7 @@ class NotificationService:
         from solders.pubkey import Pubkey
         try:
             Pubkey.from_string(addr)
+            await self.db.update_user_state(str(message.from_user.id), nonce_account=addr)
             await message.answer(
                 f"✅ *Nonce Account Configured:* `{addr[:8]}...{addr[-4:]}`\n\n"
                 "⚡ *NONCE SETUP COMPLETE*\n"
@@ -590,13 +686,9 @@ class NotificationService:
             await self.db.update_user_state(user_id, smart_thresholds_enabled=not curr)
             await message.answer(f"🧠 Smart Thresholds: {'ON' if not curr else 'OFF'}")
 
-    async def cancel_command(self, message: types.Message, state: FSMContext):
-        await state.clear()
-        await message.answer("❌ Cancelled")
-
     # ─── Critical Public API Methods (called by other services) ────────────────
 
-    async def send_threat_alert(self, wallet_address: str, score: int, reasons: list, tx_hash: str = None):
+    async def send_threat_alert(self, wallet_address: str, score: int, reasons: list, tx_hash: str = None, user_id: str = None):
         """Called by WalletMonitor, HoneyPotManager, EVMMonitor to push threat alerts."""
         threat_text = (
             f"🚨 *THREAT DETECTED*\n"
@@ -615,9 +707,11 @@ class NotificationService:
             types.InlineKeyboardButton(text="🚀 PANIC SWEEP", callback_data="sweep_all"),
             types.InlineKeyboardButton(text="✅ Dismiss", callback_data="ignore")
         )
+        # Send to the specific user's chat if user_id is known, otherwise fall back to global admin
+        target_chat = user_id if user_id else self.chat_id
         try:
             await self.bot.send_message(
-                chat_id=self.chat_id,
+                chat_id=target_chat,
                 text=threat_text,
                 parse_mode="Markdown",
                 reply_markup=builder.as_markup()
@@ -652,7 +746,7 @@ class NotificationService:
             "Example: `08:00` for 8am, `21:30` for 9:30pm",
             parse_mode="Markdown"
         )
-        await state.set_state(SetupWizard.waiting_for_schedule_time)
+        await state.set_state(SetupWizard.waiting_for_report_time)
 
     async def wizard_schedule_time(self, message: types.Message, state: FSMContext):
         if message.text and message.text.startswith('/'):
@@ -665,6 +759,27 @@ class NotificationService:
                 str(message.from_user.id),
                 daily_sweep_enabled=True,
                 daily_sweep_time=time_str
+            )
+            await message.answer(
+                f"✅ *Daily Harvest Scheduled!*\n"
+                f"Bait wallets will be swept at *{time_str}* every day.",
+                parse_mode="Markdown"
+            )
+            await state.clear()
+        else:
+            await message.answer("❌ Invalid format. Please send time as HH:MM (e.g. `02:00`).", parse_mode="Markdown")
+
+    async def wizard_report_time(self, message: types.Message, state: FSMContext):
+        if message.text and message.text.startswith('/'):
+            await message.answer("⚠️ Please use /cancel to exit the current setup process before running another command.")
+            return
+        import re
+        time_str = message.text.strip()
+        if re.match(r'^([01]\d|2[0-3]):[0-5]\d$', time_str):
+            await self.db.update_user_state(
+                str(message.from_user.id),
+                daily_report_enabled=True,
+                daily_report_time=time_str
             )
             await message.answer(
                 f"✅ *Daily Report Scheduled!*\n"
@@ -789,8 +904,16 @@ class NotificationService:
     def _register_handlers(self):
         @self.dp.callback_query(F.data.startswith("sweep_"))
         async def handle_manual_sweep_callback(callback: types.CallbackQuery):
+            import time
             target = callback.data.split("_")[1]
             user_id = str(callback.from_user.id)
+            last = self._panic_last_used.get(user_id, 0)
+            elapsed = time.time() - last
+            if elapsed < self._PANIC_COOLDOWN_SECONDS:
+                remaining = int(self._PANIC_COOLDOWN_SECONDS - elapsed)
+                await callback.answer(f"⏳ Cooldown: {remaining}s remaining.", show_alert=True)
+                return
+            self._panic_last_used[user_id] = time.time()
             if target == "all":
                 await callback.message.answer("🚀 *GLOBAL PANIC:* Sweeping...")
                 if self.emergency_service: await self.emergency_service.execute_all(user_id)
@@ -883,6 +1006,7 @@ class NotificationService:
         self.dp.message.register(self.wizard_rpc_url, SetupWizard.waiting_for_rpc_url)
         self.dp.message.register(self.wizard_schedule_time, SetupWizard.waiting_for_schedule_time)
         self.dp.message.register(self.wizard_nonce_account, SetupWizard.waiting_for_nonce_account)
+        self.dp.message.register(self.wizard_report_time, SetupWizard.waiting_for_report_time)
 
         self.dp.callback_query.register(self.handle_buy_premium_ton, F.data.startswith("buy_"))
         self.dp.callback_query.register(self.handle_toggle_auto_wizard, F.data.startswith("toggle_auto_wizard_"))

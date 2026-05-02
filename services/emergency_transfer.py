@@ -20,45 +20,78 @@ class EmergencyTransfer:
         self.db = db
         self.safe_wallet = Pubkey.from_string(config.SAFE_WALLET_ADDRESS) if config.SAFE_WALLET_ADDRESS else None
 
+    async def _decrypt_wallet_key(self, wallet_address: str) -> str | None:
+        """
+        Decrypt a wallet private key using the vault (preferred) or static ENCRYPTION_KEY fallback.
+        The vault must be unlocked for interactive sessions; automated tasks fall back to the
+        static key so scheduled harvests work even when no user session is active.
+        """
+        from utils.vault_manager import HardenedVaultManager
+        vault = HardenedVaultManager()
+        if vault.is_unlocked():
+            try:
+                key = await vault.decrypt_key(wallet_address)
+                if key:
+                    return key
+            except Exception as e:
+                logging.warning(f"Vault decryption failed for {wallet_address}, trying fallback: {e}")
+
+        # Fallback: static ENCRYPTION_KEY (used for automated/background operations)
+        if config.ENCRYPTION_KEY:
+            encrypted_blob = await self.db.get_vault_key(wallet_address)
+            if encrypted_blob:
+                try:
+                    from utils.encryption_utils import EncryptionManager
+                    return EncryptionManager(config.ENCRYPTION_KEY).decrypt(encrypted_blob).strip()
+                except Exception as e:
+                    logging.error(f"Static key decryption failed for {wallet_address}: {e}")
+        return None
+
     async def execute_all(self, user_id: str):
         """Triggers a global sweep of all protected assets for a user."""
         db = self.db
         logging.warning(f"🚨 GLOBAL PANIC: execute_all triggered for user {user_id}")
-        
-        from utils.encryption_utils import EncryptionManager
-        encryptor = EncryptionManager(config.ENCRYPTION_KEY)
-        
+
         state_row = await db.get_user_state(user_id)
         if not state_row:
             logging.error("No user state found for sweep.")
             return False
-        
+
         state = dict(state_row)
-        if not state.get('monitored_wallets_json'):
+        if not state.get("monitored_wallets_json"):
             logging.error("No monitored wallets found for sweep.")
             return False
 
-        wallets = json.loads(state['monitored_wallets_json'])
+        wallets = json.loads(state["monitored_wallets_json"])
         tasks = []
-        
+        retain = state.get("skimming_retain", 0.0)
+
         for address in wallets:
-            encrypted_key = await db.get_vault_key(address)
-            if encrypted_key:
-                try:
-                    privkey = encryptor.decrypt(encrypted_key).strip()
-                    retain = state.get('skimming_retain', 0.0)
-                    tasks.append(self.sweep_all_sol_jito(privkey, user_id=user_id, db=db, retain_sol=retain))
-                except Exception as e:
-                    logging.error(f"Failed to decrypt key for {address}: {e}")
-        
+            privkey = await self._decrypt_wallet_key(address)
+            if privkey:
+                tasks.append(
+                    self.sweep_all_sol_jito(privkey, user_id=user_id, db=db, retain_sol=retain)
+                )
+            else:
+                logging.error(f"Could not decrypt key for {address}. Skipping.")
+
         if not tasks:
-            logging.error("No valid keys found in vault for any wallet.")
+            logging.error("No decryptable keys found in vault for any monitored wallet.")
+            if hasattr(self, "notification_service") and self.notification_service:
+                await self.notification_service.send_status_update(
+                    "❌ *PANIC FAILED:* Vault is locked or no keys found. Run /unlock first."
+                )
             return False
 
         results = await asyncio.gather(*tasks, return_exceptions=True)
         success_count = sum(1 for r in results if r and not isinstance(r, Exception))
-        
+        failure_count = len(tasks) - success_count
+
         logging.info(f"Global Panic Complete: {success_count}/{len(tasks)} wallets swept.")
+        if failure_count > 0 and hasattr(self, "notification_service") and self.notification_service:
+            await self.notification_service.send_status_update(
+                f"⚠️ *PANIC PARTIAL:* {success_count} swept, {failure_count} failed."
+            )
         return success_count > 0
 
     async def sweep_all_sol_jito(self, source_keypair_base58: str, user_id: str, db=None, retain_sol=0.0):
@@ -122,11 +155,15 @@ class EmergencyTransfer:
                     return None
             
             # 3. Dynamic Aggression (High Value Protection)
-            # If rescuing > 1 SOL, force a 0.005 tip for maximum safety
+            # If rescuing > 1 SOL, ensure at least 0.005 tip — but never lower a higher dynamic tip
             if balance > 1.0:
-                logging.warning(f"🚀 HIGH VALUE DETECTED ({balance} SOL). Ramping Tip to 0.005 SOL for maximum priority.")
-                tip_sol = 0.005
-                tip_lamports = 5_000_000
+                high_value_min = 0.005
+                if tip_sol < high_value_min:
+                    tip_sol = high_value_min
+                    tip_lamports = 5_000_000
+                    logging.warning(f"🚀 HIGH VALUE DETECTED ({balance} SOL). Ramping Tip to {tip_sol} SOL for maximum priority.")
+                else:
+                    logging.warning(f"🚀 HIGH VALUE DETECTED ({balance} SOL). Keeping dynamic tip {tip_sol:.6f} SOL.")
 
             # 3. Build sweep amounts
             # Jito path: deduct tip + tx fee + retain
@@ -172,13 +209,16 @@ class EmergencyTransfer:
                 recent_blockhash
             )
             jito_tx = VersionedTransaction(jito_message, [source_kp])
+            # Derive the actual on-chain tx signature from the signed transaction
+            # (The bundle UUID returned by Jito differs from the real tx signature)
+            actual_tx_sig = str(jito_tx.signatures[0])
+            SignatureRegistry().register(actual_tx_sig)
 
             # ── Attempt Jito Bundle (tip only paid if this succeeds) ─────────
-            signature = await self.jito_client.send_bundle([jito_tx])
-            if signature:
-                SignatureRegistry().register(signature)
-                logging.info(f"🚀 Jito Bundle confirmed! Tip: {tip_sol} SOL paid atomically. Sig: {signature}")
-                return signature
+            bundle_id = await self.jito_client.send_bundle([jito_tx])
+            if bundle_id:
+                logging.info(f"🚀 Jito Bundle submitted! Tip: {tip_sol} SOL. Bundle: {bundle_id} | TX: {actual_tx_sig}")
+                return actual_tx_sig
 
             # ── Fallback: Standard RPC — NO tip sent ────────────────────────
             logging.warning("⚠️ Jito Bundle failed. Falling back to tip-free standard RPC broadcast...")
